@@ -3,10 +3,10 @@
 import pprint
 import unittest
 import json
-import mongoengine
-
 from unittest.mock import patch
 from argparse import Namespace
+
+import mongoengine
 
 from pycoshark.mongomodels import Project, PullRequestSystem, PullRequest, People, PullRequestReview, PullRequestReviewComment, PullRequestComment, PullRequestEvent
 from prSHARK.backends.github import Github
@@ -29,6 +29,12 @@ with open('tests/fixtures/issue_comments.json', 'r') as f:
 
 with open('tests/fixtures/issue_events.json', 'r') as f:
     issue_event_list = json.loads(f.read())
+
+with open('tests/fixtures/pr_commits.json', 'r') as f:
+    pr_commit_list = json.loads(f.read())
+
+with open('tests/fixtures/pr_files.json', 'r') as f:
+    pr_file_list = json.loads(f.read())
 
 
 def mock_return(*args, **kwargs):

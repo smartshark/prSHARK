@@ -6,12 +6,12 @@ import copy
 import requests
 import dateutil
 
-from pycoshark.mongomodels import VCSSystem, Commit, PullRequest, People, PullRequestReview, PullRequestReviewComment, PullRequestComment, PullRequestEvent
+from pycoshark.mongomodels import VCSSystem, Commit, PullRequest, People, PullRequestReview, PullRequestReviewComment, PullRequestComment, PullRequestEvent, PullRequestCommit, PullRequestFile
 
 
 class Github():
 
-    def  __init__(self, config, project, pull_request_system):
+    def __init__(self, config, project, pull_request_system):
         self.config = config
         self._log = logging.getLogger('prSHARK.github')
 
@@ -140,6 +140,14 @@ class Github():
         url = '{}/{}/reviews/{}/comments?'.format(self.config.tracking_url, pr_number, review_number)
         return self._fetch_all_pages(url)
 
+    def fetch_commit_list(self, pr_number):
+        url = '{}/{}/commits?'.format(self.config.tracking_url, pr_number)
+        return self._fetch_all_pages(url)
+
+    def fetch_file_list(self, pr_number):
+        url = '{}/{}/files?'.format(self.config.tracking_url, pr_number)
+        return self._fetch_all_pages(url)
+
     def parse_pr_list(self, prs):
         """Parse response from the Github API.
         We are saving all mongo objects here.
@@ -158,16 +166,16 @@ class Github():
             mongo_pr.is_draft = pr['draft']
             mongo_pr.created_at = dateutil.parser.parse(pr['created_at'])
             mongo_pr.updated_at = dateutil.parser.parse(pr['updated_at'])
-            
+
             if pr['closed_at']:
                 mongo_pr.closed_at = dateutil.parser.parse(pr['closed_at'])
-            
+
             if pr['merged_at']:
                 mongo_pr.merged_at = dateutil.parser.parse(pr['merged_at'])
-            
+
             if pr['assignee']:
                 mongo_pr.assignee_id = self._get_person(pr['assignee']['url'])
-   
+
             mongo_pr.creator_id = self._get_person(pr['user']['url'])
             mongo_pr.author_association = pr['author_association']
 
@@ -234,6 +242,20 @@ class Github():
                             ref_prrc.save()  # create empty for ref, will get populated later
                         mongo_prrc.in_reply_to_id = ref_prrc.id
                     mongo_prrc.save()
+            # pr commits
+            for pr_commit in self.fetch_commit_list(pr['number']):
+                try:
+                    mongo_pr_commit = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=pr_commit['sha'])
+                except PullRequestCommit.DoesNotExist:
+                    mongo_pr_commit = PullRequestCommit(pull_request_id=mongo_pr.id, commit_sha=pr_commit['sha'])
+
+                mongo_pr_commit.created_at = dateutil.parser.parse(pr_commit['created_at'])
+                mongo_pr_commit.author_id = self._get_person(pr_commit['author']['url'])
+                mongo_pr_commit.committer_id = self._get_person(pr_commit['committer']['url'])
+
+            # pr files
+            for pr_file in self.fetch_file_list(pr['number']):
+                pass
 
             # comments outside of reviews
             for c in self.fetch_comment_list(pr['number']):

@@ -54,7 +54,7 @@ def main(args):
     pr_system.last_updated = datetime.datetime.now()
     pr_system.save()
 
-    # now we do the actual work
+    # now we do the actual work, we are lazy for now and to not use a more dynamic import of backends
     if args.backend == 'github':
         from prSHARK.backends.github import Github
         gh = Github(cfg, project, pr_system)
