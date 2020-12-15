@@ -8,7 +8,7 @@ from argparse import Namespace
 
 import mongoengine
 
-from pycoshark.mongomodels import Project, PullRequestSystem, PullRequest, People, PullRequestReview, PullRequestReviewComment, PullRequestComment, PullRequestEvent
+from pycoshark.mongomodels import Project, VCSSystem, Commit, PullRequestSystem, PullRequest, People, PullRequestReview, PullRequestReviewComment, PullRequestComment, PullRequestEvent, PullRequestCommit, PullRequestFile
 from prSHARK.backends.github import Github
 
 # load simple fixtures (taken from the github api examples)
@@ -52,6 +52,10 @@ def mock_return(*args, **kwargs):
         return issue_comment_list
     if '/issues/' in url and url.endswith('/events'):
         return issue_event_list
+    if '/pulls/' in url and url.endswith('/commits'):
+        return pr_commit_list
+    if '/pulls/' in url and url.endswith('/files'):
+        return pr_file_list
 
 
 class TestGithubBackend(unittest.TestCase):
@@ -80,6 +84,12 @@ class TestGithubBackend(unittest.TestCase):
         project = Project.objects.get(name='test')
         pr_system = PullRequestSystem.objects.get(project_id=project.id)
 
+        vcs_system = VCSSystem(project_id=project.id, url='https://github.com/repos/octocat.git', repository_type='git')
+        vcs_system.save()
+
+        c = Commit(vcs_system_id=vcs_system.id, revision_hash='6dcb09b5b57875f334f61aebed695e2e4193db5e')
+        c.save()
+
         with open('tests/fixtures/pr_list.json', 'r') as fi:
             data = json.loads(fi.read())
 
@@ -95,9 +105,36 @@ class TestGithubBackend(unittest.TestCase):
         prc = PullRequestComment.objects.get(pull_request_id=pr.id)
         pre = PullRequestEvent.objects.get(pull_request_id=pr.id)
 
+        prcc = PullRequestCommit.objects.get(pull_request_id=pr.id)
+        prccf = PullRequestFile.objects.get(pull_request_commit_id=prcc.id)
+
         self.assertEqual(pr.title, pr1['title'])
         self.assertEqual(p.name, 'monalisa octocat')
         self.assertEqual(prr.state, 'APPROVED')
         self.assertEqual(prrc.comment, 'Great stuff!')
         self.assertEqual(prc.comment, 'Me too')
+
+        # evertyhing for the event
         self.assertEqual(pre.event_type, 'closed')
+        self.assertEqual(pre.commit_repo_url, 'https://github.com/octocat/Hello-World')
+        self.assertEqual(pre.commit_sha, '6dcb09b5b57875f334f61aebed695e2e4193db5e')
+        self.assertEqual(pre.commit_id, c.id)
+
+        # everything for the commit
+        author_id = People.objects.get(name='monalisa octocat').id
+        self.assertEqual(prcc.commit_sha, '6dcb09b5b57875f334f61aebed695e2e4193db5e')
+        self.assertEqual(prcc.commit_repo_url, 'https://github.com/octocat/Hello-World')
+        self.assertEqual(prcc.message, "Fix all the bugs")
+        self.assertEqual(prcc.author_id, author_id)
+        self.assertEqual(prcc.committer_id, author_id)
+        self.assertEqual(prcc.commit_id, c.id)  # should equal our created Commit above
+        self.assertEqual(prcc.parents, ['6dcb09b5b57875f334f61aebed695e2e4193db5e'])
+
+        # everything for the file
+        self.assertEqual(prccf.sha, 'bbcd538c8e72b8c175046e27cc8f907076331401')
+        self.assertEqual(prccf.path, 'file1.txt')
+        self.assertEqual(prccf.status, 'added')
+        self.assertEqual(prccf.additions, 103)
+        self.assertEqual(prccf.deletions, 21)
+        self.assertEqual(prccf.changes, 103 + 21)
+        self.assertEqual(prccf.patch, "@@ -132,7 +132,7 @@ module Test @@ -1000,7 +1000,7 @@ module Test")

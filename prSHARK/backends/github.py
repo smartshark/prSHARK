@@ -67,6 +67,20 @@ class Github():
 
         raise requests.RequestException("Problem with getting data via url %s." % url)
 
+    def _get_repo_url(self, api_url):
+        """Changes API url for pull request commit to repository url.
+            https://api.github.com/repos/octocat/Hello-World/commits/6dcb09b5b57875f334f61aebed695e2e4193db5e
+            ->
+            https://github.com/repos/octocat
+        """
+        url = api_url.replace('https://api.github.com/repos', 'github.com')
+        url = '/'.join(url.split('/')[:3])
+        return 'https://' + url
+
+    def _get_pr_commit_id(self, pull_request_id, commit_sha):
+        prc = PullRequestCommit.objects.get(pull_request_id=pull_request_id, commit_sha=commit_sha)
+        return prc.id
+
     def _get_person(self, user_url):
         """
         Gets the person via the user url
@@ -242,6 +256,7 @@ class Github():
                             ref_prrc.save()  # create empty for ref, will get populated later
                         mongo_prrc.in_reply_to_id = ref_prrc.id
                     mongo_prrc.save()
+
             # pr commits
             for pr_commit in self.fetch_commit_list(pr['number']):
                 try:
@@ -249,13 +264,27 @@ class Github():
                 except PullRequestCommit.DoesNotExist:
                     mongo_pr_commit = PullRequestCommit(pull_request_id=mongo_pr.id, commit_sha=pr_commit['sha'])
 
-                mongo_pr_commit.created_at = dateutil.parser.parse(pr_commit['created_at'])
                 mongo_pr_commit.author_id = self._get_person(pr_commit['author']['url'])
                 mongo_pr_commit.committer_id = self._get_person(pr_commit['committer']['url'])
+                mongo_pr_commit.parents = [p['sha'] for p in pr_commit['parents']]
+                mongo_pr_commit.message = pr_commit['commit']['message']
+                mongo_pr_commit.commit_repo_url = self._get_repo_url(pr_commit['url'])
+                mongo_pr_commit.commit_id = self._get_commit_id(mongo_pr_commit.commit_sha)
+                mongo_pr_commit.save()
 
-            # pr files
+            # pr files, sha is not a link to PullRequestCommit, maybe its the file hash
             for pr_file in self.fetch_file_list(pr['number']):
-                pass
+                try:
+                    mongo_pr_file = PullRequestFile.objects.get(pull_request_id=mongo_pr.id, sha=pr_file['sha'], path=pr_file['filename'])
+                except PullRequestFile.DoesNotExist:
+                    mongo_pr_file = PullRequestFile(pull_request_id=mongo_pr.id, sha=pr_file['sha'], path=pr_file['filename'])
+
+                mongo_pr_file.status = pr_file['status']
+                mongo_pr_file.additions = pr_file['additions']
+                mongo_pr_file.deletions = pr_file['deletions']
+                mongo_pr_file.changes = pr_file['changes']
+                mongo_pr_file.patch = pr_file['patch']
+                mongo_pr_file.save()
 
             # comments outside of reviews
             for c in self.fetch_comment_list(pr['number']):
@@ -279,11 +308,11 @@ class Github():
                 mongo_pre.author_id = self._get_person(e['actor']['url'])
                 mongo_pre.created_at = dateutil.parser.parse(e['created_at'])
                 mongo_pre.event_type = e['event']
-
+                
                 if e['commit_id']:
-                    commit = self._get_commit(e['commit_id'])
-                    if commit:
-                        mongo_pre.commit_id = commit.id
+                    mongo_pre.commit_id = self._get_commit_id(e['commit_id'])
+                    mongo_pre.commit_sha = e['commit_id']
+                    mongo_pre.commit_repo_url = self._get_repo_url(e['url'])
 
                 # remove all common attributes then store excess as additional_data
                 ad = copy.deepcopy(e)
@@ -298,11 +327,11 @@ class Github():
                 mongo_pre.additional_data = ad
                 mongo_pre.save()
 
-    def _get_commit(self, revision_hash):
-        commit = None
+    def _get_commit_id(self, revision_hash):
+        commit_id = None
         for vcs in VCSSystem.objects.filter(project_id=self._p.id):
             try:
-                commit = Commit.objects.get(vcs_system_id=vcs.id, revision_hash=revision_hash)
+                commit_id = Commit.objects.get(vcs_system_id=vcs.id, revision_hash=revision_hash).id
             except Commit.DoesNotExist:
                 pass
-        return commit
+        return commit_id
