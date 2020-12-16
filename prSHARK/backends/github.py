@@ -294,8 +294,10 @@ class Github():
                     mongo_prc = PullRequestComment(pull_request_id=mongo_pr.id, external_id=str(c['id']))
 
                 mongo_prc.created_at = dateutil.parser.parse(c['created_at'])
+                mongo_prc.updated_at = dateutil.parser.parse(c['updated_at'])
                 mongo_prc.author_id = self._get_person(c['user']['url'])
                 mongo_prc.comment = c['body']
+                mongo_prc.author_association = c['author_association']
                 mongo_prc.save()
 
             # events

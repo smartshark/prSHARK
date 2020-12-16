@@ -1,5 +1,6 @@
 """Tests for the github backend"""
 
+import datetime
 import pprint
 import unittest
 import json
@@ -106,19 +107,36 @@ class TestGithubBackend(unittest.TestCase):
         pre = PullRequestEvent.objects.get(pull_request_id=pr.id)
 
         prcc = PullRequestCommit.objects.get(pull_request_id=pr.id)
-        prccf = PullRequestFile.objects.get(pull_request_commit_id=prcc.id)
+        prccf = PullRequestFile.objects.get(pull_request_id=pr.id)
 
         self.assertEqual(pr.title, pr1['title'])
         self.assertEqual(p.name, 'monalisa octocat')
         self.assertEqual(prr.state, 'APPROVED')
+
+        # pull request review comment
         self.assertEqual(prrc.comment, 'Great stuff!')
+        self.assertEqual(prrc.path, 'file1.txt')
+        self.assertEqual(prrc.position, 1)
+        self.assertEqual(prrc.original_position, 4)
+        self.assertEqual(prrc.diff_hunk, '@@ -16,33 +16,40 @@ public class Connection : IConnection...')
+        self.assertEqual(prrc.created_at, datetime.datetime(2011, 4, 14, 16, 0, 49))
+        self.assertEqual(prrc.updated_at, datetime.datetime(2011, 4, 14, 16, 0, 49))
+        self.assertEqual(prrc.author_association, "NONE")
+        self.assertEqual(prrc.creator_id, p.id)
+
+        # everthing for the pull request comment (not review comment!)
         self.assertEqual(prc.comment, 'Me too')
+        self.assertEqual(prc.author_id, p.id)
+        self.assertEqual(prc.created_at, datetime.datetime(2011, 4, 14, 16, 0, 49))
+        self.assertEqual(prc.updated_at, datetime.datetime(2011, 4, 14, 16, 0, 49))
+        self.assertEqual(prc.author_association, 'collaborator')
 
         # evertyhing for the event
         self.assertEqual(pre.event_type, 'closed')
         self.assertEqual(pre.commit_repo_url, 'https://github.com/octocat/Hello-World')
         self.assertEqual(pre.commit_sha, '6dcb09b5b57875f334f61aebed695e2e4193db5e')
         self.assertEqual(pre.commit_id, c.id)
+        self.assertEqual(pre.created_at, datetime.datetime(2011, 4, 14, 16, 0, 49))
 
         # everything for the commit
         author_id = People.objects.get(name='monalisa octocat').id
