@@ -222,7 +222,7 @@ class Github():
                 mongo_prr.state = prr['state']
                 mongo_prr.description = prr['body']
                 mongo_prr.submitted_at = dateutil.parser.parse(prr['submitted_at'])
-                mongo_prr.revision_hash = prr['commit_id']
+                mongo_prr.commit_sha = prr['commit_id']
                 mongo_prr.creator_id = self._get_person(prr['user']['url'])
                 mongo_prr.author_association = prr['author_association']
                 mongo_prr.save()
@@ -245,8 +245,8 @@ class Github():
                     mongo_prrc.updated_at = dateutil.parser.parse(prrc['updated_at'])
                     mongo_prrc.author_association = prrc['author_association']
 
-                    mongo_prrc.revision_hash = prrc['commit_id']
-                    mongo_prrc.original_revision_hash = prrc['original_commit_id']
+                    mongo_prrc.commit_sha = prrc['commit_id']
+                    mongo_prrc.original_commit_sha = prrc['original_commit_id']
 
                     if 'in_reply_to_id' in prrc.keys() and prrc['in_reply_to_id']:
                         try:

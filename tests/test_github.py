@@ -115,9 +115,10 @@ class TestGithubBackend(unittest.TestCase):
         # pull request review
         self.assertEqual(prr.state, 'APPROVED')
         self.assertEqual(prr.description, 'Here is the body for the review.')
-        self.assertEqual(prr.submitted_at, datetime.datetime(2011, 4, 14, 16, 0, 49))
+        self.assertEqual(prr.submitted_at, datetime.datetime(2019, 11, 17, 17, 43, 43))
         self.assertEqual(prr.author_association, 'collaborator')
-
+        self.assertEqual(prr.creator_id, p.id)
+        self.assertEqual(prr.commit_sha, 'ecdd80bb57125d7ba9641ffaa4d7d2c19d3f3091')
 
         # pull request review comment
         self.assertEqual(prrc.comment, 'Great stuff!')
@@ -129,6 +130,8 @@ class TestGithubBackend(unittest.TestCase):
         self.assertEqual(prrc.updated_at, datetime.datetime(2011, 4, 14, 16, 0, 49))
         self.assertEqual(prrc.author_association, "NONE")
         self.assertEqual(prrc.creator_id, p.id)
+        self.assertEqual(prrc.commit_sha, '6dcb09b5b57875f334f61aebed695e2e4193db5e')
+        self.assertEqual(prrc.original_commit_sha, '9c48853fa3dc5c1c3d6f1f1cd1f2743e72652840')
 
         # everthing for the pull request comment (not review comment!)
         self.assertEqual(prc.comment, 'Me too')
