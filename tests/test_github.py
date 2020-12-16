@@ -111,7 +111,13 @@ class TestGithubBackend(unittest.TestCase):
 
         self.assertEqual(pr.title, pr1['title'])
         self.assertEqual(p.name, 'monalisa octocat')
+
+        # pull request review
         self.assertEqual(prr.state, 'APPROVED')
+        self.assertEqual(prr.description, 'Here is the body for the review.')
+        self.assertEqual(prr.submitted_at, datetime.datetime(2011, 4, 14, 16, 0, 49))
+        self.assertEqual(prr.author_association, 'collaborator')
+
 
         # pull request review comment
         self.assertEqual(prrc.comment, 'Great stuff!')
