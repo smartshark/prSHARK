@@ -377,22 +377,12 @@ class Github():
                     try:
                         n_prc = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=mongo_prrc.commit_sha)
                         mongo_prrc.pull_request_commit_id = n_prc.id
-
-                        if n_prc.commit_id:
-                            self._log.info('found lokal commit link')
-                        else:
-                            self._log.info('no link to local commit for %s from %s', n_prc.commit_sha, n_prc.commit_repo_url)
                     except PullRequestCommit.DoesNotExist:
                         pass
 
                     try:
                         n2_prc = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=mongo_prrc.original_commit_sha)
                         mongo_prrc.original_pull_request_commit_id = n2_prc.id
-
-                        if n2_prc.commit_id:
-                            self._log.info('found lokal commit link')
-                        else:
-                            self._log.info('no link to local commit for %s from %s', n2_prc.commit_sha, n2_prc.commit_repo_url)
                     except PullRequestCommit.DoesNotExist:
                         pass
 
