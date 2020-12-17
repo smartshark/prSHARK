@@ -345,6 +345,13 @@ class Github():
                 mongo_prr.description = prr['body']
                 mongo_prr.submitted_at = dateutil.parser.parse(prr['submitted_at'])
                 mongo_prr.commit_sha = prr['commit_id']
+                
+                try:
+                    n0_prc = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=mongo_prr.commit_sha)
+                    mongo_prr.pull_request_commit_id = n0_prc.id
+                except PullRequestCommit.DoesNotExist:
+                    pass
+
                 mongo_prr.creator_id = self._get_person(prr['user']['url'])
                 mongo_prr.author_association = prr['author_association']
                 mongo_prr.save()
@@ -372,11 +379,11 @@ class Github():
 
                     mongo_prrc.commit_sha = prrc['commit_id']
                     mongo_prrc.original_commit_sha = prrc['original_commit_id']
-                    
+ 
                     # we link the PullRequestCommits directly if we can
                     try:
-                        n_prc = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=mongo_prrc.commit_sha)
-                        mongo_prrc.pull_request_commit_id = n_prc.id
+                        n1_prc = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=mongo_prrc.commit_sha)
+                        mongo_prrc.pull_request_commit_id = n1_prc.id
                     except PullRequestCommit.DoesNotExist:
                         pass
 
