@@ -47,7 +47,13 @@
       "pull_request": {
         "href": "https://api.github.com/repos/octocat/Hello-World/pulls/1"
       }
-    }
+    },
+    "start_line": 1,
+    "original_start_line": 1,
+    "start_side": "RIGHT",
+    "line": 2,
+    "original_line": 2,
+    "side": "RIGHT"
   }
 ]
 

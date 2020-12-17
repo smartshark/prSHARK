@@ -16,6 +16,12 @@ from prSHARK.backends.github import Github
 with open('tests/fixtures/user.json') as f:
     person = json.loads(f.read())
 
+with open('tests/fixtures/user2.json') as f:
+    person2 = json.loads(f.read())
+
+with open('tests/fixtures/user3.json') as f:
+    person3 = json.loads(f.read())
+
 with open('tests/fixtures/pr_list.json', 'r') as f:
     pr_list = json.loads(f.read())
 
@@ -40,8 +46,12 @@ with open('tests/fixtures/pr_files.json', 'r') as f:
 
 def mock_return(*args, **kwargs):
     url = args[0].split('?')[0]
-    if 'user' in url:
+    if 'user' in url and 'octocat' in url:
         return person
+    if 'user' in url and 'hubot' in url:
+        return person2
+    if 'user' in url and 'other_user' in url:
+        return person3
 
     if url.endswith('/pulls'):
         return pr_list
@@ -85,11 +95,14 @@ class TestGithubBackend(unittest.TestCase):
         project = Project.objects.get(name='test')
         pr_system = PullRequestSystem.objects.get(project_id=project.id)
 
-        vcs_system = VCSSystem(project_id=project.id, url='https://github.com/repos/octocat.git', repository_type='git')
+        vcs_system = VCSSystem(project_id=project.id, url='https://github.com/octocat/Hello-World.git', repository_type='git')
         vcs_system.save()
 
         c = Commit(vcs_system_id=vcs_system.id, revision_hash='6dcb09b5b57875f334f61aebed695e2e4193db5e')
         c.save()
+
+        mc = Commit(vcs_system_id=vcs_system.id, revision_hash='e5bd3914e2e596debea16f433f57875b5b90bcd6')
+        mc.save()
 
         with open('tests/fixtures/pr_list.json', 'r') as fi:
             data = json.loads(fi.read())
@@ -100,6 +113,8 @@ class TestGithubBackend(unittest.TestCase):
 
         pr = PullRequest.objects.get(external_id='1347')
         p = People.objects.get(id=pr.assignee_id)
+        h = People.objects.get(name='mr hubot')
+        o = People.objects.get(name='other user')
         prr = PullRequestReview.objects.get(pull_request_id=pr.id)
         prrc = PullRequestReviewComment.objects.get(pull_request_review_id=prr.id, external_id='10')
 
@@ -109,8 +124,35 @@ class TestGithubBackend(unittest.TestCase):
         prcc = PullRequestCommit.objects.get(pull_request_id=pr.id)
         prccf = PullRequestFile.objects.get(pull_request_id=pr.id)
 
-        self.assertEqual(pr.title, pr1['title'])
         self.assertEqual(p.name, 'monalisa octocat')
+        self.assertEqual(h.name, 'mr hubot')
+        self.assertEqual(o.name, 'other user')
+
+        # pull request
+        self.assertEqual(pr.title, pr1['title'])
+        self.assertEqual(pr.description, pr1['body'])
+        self.assertEqual(pr.state, pr1['state'])
+        self.assertEqual(pr.is_locked, pr1['locked'])
+        self.assertEqual(pr.is_draft, pr1['draft'])
+        self.assertEqual(pr.lock_reason, pr1['active_lock_reason'])
+        self.assertEqual(pr.labels, [pr1['labels'][0]['name']])
+        self.assertEqual(pr.author_association, pr1['author_association'])
+
+        self.assertEqual(pr.created_at, datetime.datetime(2011, 1, 26, 19, 1, 12))
+        self.assertEqual(pr.updated_at, datetime.datetime(2011, 1, 26, 19, 1, 12))
+        self.assertEqual(pr.merged_at, datetime.datetime(2011, 1, 26, 19, 1, 12))
+        self.assertEqual(pr.merge_commit_id, mc.id)
+        self.assertEqual(pr.creator_id, p.id)
+        self.assertEqual(pr.assignee_id, p.id)
+        self.assertEqual(pr.linked_user_ids, [p.id, h.id])
+        self.assertEqual(pr.requested_reviewer_ids, [o.id])
+        self.assertEqual(pr.source_repo_url, 'https://github.com/octocat/Hello-World')
+        self.assertEqual(pr.source_branch, 'new-topic')
+        self.assertEqual(pr.source_commit_sha, '6dcb09b5b57875f334f61aebed695e2e4193db5e')
+
+        self.assertEqual(pr.target_repo_url, 'https://github.com/octocat/Hello-World')
+        self.assertEqual(pr.target_branch, 'master')
+        self.assertEqual(pr.target_commit_sha, '6dcb09b5b57875f334f61aebed695e2e4193db5e')
 
         # pull request review
         self.assertEqual(prr.state, 'APPROVED')
@@ -132,6 +174,13 @@ class TestGithubBackend(unittest.TestCase):
         self.assertEqual(prrc.creator_id, p.id)
         self.assertEqual(prrc.commit_sha, '6dcb09b5b57875f334f61aebed695e2e4193db5e')
         self.assertEqual(prrc.original_commit_sha, '9c48853fa3dc5c1c3d6f1f1cd1f2743e72652840')
+
+        self.assertEqual(prrc.start_line, 1)
+        self.assertEqual(prrc.original_start_line, 1)
+        self.assertEqual(prrc.start_side, 'RIGHT')
+        self.assertEqual(prrc.line, 2)
+        self.assertEqual(prrc.original_line, 2)
+        self.assertEqual(prrc.side, 'RIGHT')
 
         # everthing for the pull request comment (not review comment!)
         self.assertEqual(prc.comment, 'Me too')

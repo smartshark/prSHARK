@@ -181,6 +181,7 @@ class Github():
             mongo_pr.created_at = dateutil.parser.parse(pr['created_at'])
             mongo_pr.updated_at = dateutil.parser.parse(pr['updated_at'])
 
+            mongo_pr.merge_commit_id = self._get_commit_id(pr['merge_commit_sha'])
             if pr['closed_at']:
                 mongo_pr.closed_at = dateutil.parser.parse(pr['closed_at'])
 
@@ -195,11 +196,18 @@ class Github():
 
             # head = fork, source of pull
             # base = target of pull, this should be in our data already
-            target = pr['base']['repo']['full_name'] + ':' + pr['base']['ref']  # apache/commons-validator:master
-            source = pr['head']['repo']['full_name'] + ':' + pr['head']['ref']  # apache/commons-validator:master
+            # target = pr['base']['repo']['full_name'] + ':' + pr['base']['ref']  # apache/commons-validator:master
+            # source = pr['head']['repo']['full_name'] + ':' + pr['head']['ref']  # apache/commons-validator:master
 
-            mongo_pr.source = source
-            mongo_pr.target = target
+            mongo_pr.source_repo_url = 'https://github.com/' + pr['head']['repo']['full_name']
+            mongo_pr.source_branch = pr['head']['ref']
+            mongo_pr.source_commit_sha = pr['head']['sha']
+            mongo_pr.source_commit_id = self._get_commit_id(pr['head']['sha'], pr['head']['repo']['full_name'])
+
+            mongo_pr.target_repo_url = 'https://github.com/' + pr['base']['repo']['full_name']
+            mongo_pr.target_branch = pr['base']['ref']
+            mongo_pr.target_commit_sha = pr['base']['sha']
+            mongo_pr.target_commit_id = self._get_commit_id(pr['base']['sha'], pr['base']['repo']['full_name'])
 
             for u in pr['assignees']:
                 mongo_pr.linked_user_ids.append(self._get_person(u['url']))
@@ -248,6 +256,13 @@ class Github():
                     mongo_prrc.commit_sha = prrc['commit_id']
                     mongo_prrc.original_commit_sha = prrc['original_commit_id']
 
+                    mongo_prrc.start_line = prrc['start_line']
+                    mongo_prrc.original_start_line = prrc['original_start_line']
+                    mongo_prrc.start_side = prrc['start_side']
+                    mongo_prrc.line = prrc['line']
+                    mongo_prrc.original_line = prrc['original_line']
+                    mongo_prrc.side = prrc['side']
+
                     if 'in_reply_to_id' in prrc.keys() and prrc['in_reply_to_id']:
                         try:
                             ref_prrc = PullRequestReviewComment.objects.get(pull_request_review_id=mongo_prr.id, external_id=str(prrc['in_reply_to_id']))
@@ -269,7 +284,7 @@ class Github():
                 mongo_pr_commit.parents = [p['sha'] for p in pr_commit['parents']]
                 mongo_pr_commit.message = pr_commit['commit']['message']
                 mongo_pr_commit.commit_repo_url = self._get_repo_url(pr_commit['url'])
-                mongo_pr_commit.commit_id = self._get_commit_id(mongo_pr_commit.commit_sha)
+                mongo_pr_commit.commit_id = self._get_commit_id(mongo_pr_commit.commit_sha, mongo_pr_commit.commit_repo_url)
                 mongo_pr_commit.save()
 
             # pr files, sha is not a link to PullRequestCommit, maybe its the file hash
@@ -312,7 +327,8 @@ class Github():
                 mongo_pre.event_type = e['event']
                 
                 if e['commit_id']:
-                    mongo_pre.commit_id = self._get_commit_id(e['commit_id'])
+                    print(e['commit_id'], 'in', self._get_repo_url(e['url']))
+                    mongo_pre.commit_id = self._get_commit_id(e['commit_id'], self._get_repo_url(e['url']))
                     mongo_pre.commit_sha = e['commit_id']
                     mongo_pre.commit_repo_url = self._get_repo_url(e['url'])
 
@@ -329,9 +345,11 @@ class Github():
                 mongo_pre.additional_data = ad
                 mongo_pre.save()
 
-    def _get_commit_id(self, revision_hash):
+    def _get_commit_id(self, revision_hash, repo_url=None):
         commit_id = None
         for vcs in VCSSystem.objects.filter(project_id=self._p.id):
+            if repo_url and repo_url not in vcs.url:
+                continue
             try:
                 commit_id = Commit.objects.get(vcs_system_id=vcs.id, revision_hash=revision_hash).id
             except Commit.DoesNotExist:
