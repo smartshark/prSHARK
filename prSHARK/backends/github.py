@@ -82,11 +82,31 @@ class Github():
         url = '/'.join(url.split('/')[:3])
         return 'https://' + url
 
+    def _get_commit_id(self, revision_hash, repo_url):
+        """Links revision_hash and repo_url to existing commits within our MongoDB.
+        
+        We require the repo_url because the revision_hash is only unique within one repository.
+
+        :param revision_hash: commit sha for which to fetch the commit id
+        :param repo_url: repository url for which to fetch the commit id
+        :return: commit_id from MongoDB or None
+        """
+        commit_id = None
+        for vcs in VCSSystem.objects.filter(project_id=self._p.id):
+            if repo_url and repo_url not in vcs.url:
+                continue
+            try:
+                commit_id = Commit.objects.get(vcs_system_id=vcs.id, revision_hash=revision_hash).id
+            except Commit.DoesNotExist:
+                pass
+        return commit_id
+
     def _get_person(self, user_url):
         """
         Gets the person via the user url
 
         :param user_url: url to the github API to get information of the user
+        :return: people_id from MongoDB
         """
         # Check if user was accessed before. This reduces the amount of API requests to github
         if user_url in self._people:
@@ -111,7 +131,7 @@ class Github():
 
     def _fetch_all_pages(self, base_url):
         """Convenience method that fetches all available data from all pages.
-        
+
         :param base_url: url to the github API (should support pagination)
         """
         ret = []
@@ -161,8 +181,8 @@ class Github():
         return self._fetch_all_pages(url)
 
     def fetch_review_list(self, pr_number):
-        """Fetch pull request reviews
-        
+        """Fetch pull request review 
+
         :param pr_number: pull request number for which to fetch reviews
         """
         url = '{}/{}/reviews?'.format(self.config.tracking_url, pr_number)
@@ -213,7 +233,6 @@ class Github():
             mongo_pr.created_at = dateutil.parser.parse(pr['created_at'])
             mongo_pr.updated_at = dateutil.parser.parse(pr['updated_at'])
 
-            mongo_pr.merge_commit_id = self._get_commit_id(pr['merge_commit_sha'])
             if pr['closed_at']:
                 mongo_pr.closed_at = dateutil.parser.parse(pr['closed_at'])
 
@@ -232,12 +251,14 @@ class Github():
             mongo_pr.source_repo_url = 'https://github.com/' + pr['head']['repo']['full_name']
             mongo_pr.source_branch = pr['head']['ref']
             mongo_pr.source_commit_sha = pr['head']['sha']
-            mongo_pr.source_commit_id = self._get_commit_id(pr['head']['sha'], pr['head']['repo']['full_name'])
+            mongo_pr.source_commit_id = self._get_commit_id(pr['head']['sha'], mongo_pr.source_repo_url)
 
             mongo_pr.target_repo_url = 'https://github.com/' + pr['base']['repo']['full_name']
             mongo_pr.target_branch = pr['base']['ref']
             mongo_pr.target_commit_sha = pr['base']['sha']
-            mongo_pr.target_commit_id = self._get_commit_id(pr['base']['sha'], pr['base']['repo']['full_name'])
+            mongo_pr.target_commit_id = self._get_commit_id(pr['base']['sha'], mongo_pr.target_repo_url)
+
+            mongo_pr.merge_commit_id = self._get_commit_id(pr['merge_commit_sha'], mongo_pr.target_repo_url)
 
             for u in pr['assignees']:
                 mongo_pr.linked_user_ids.append(self._get_person(u['url']))
@@ -374,13 +395,3 @@ class Github():
                 mongo_pre.additional_data = ad
                 mongo_pre.save()
 
-    def _get_commit_id(self, revision_hash, repo_url=None):
-        commit_id = None
-        for vcs in VCSSystem.objects.filter(project_id=self._p.id):
-            if repo_url and repo_url not in vcs.url:
-                continue
-            try:
-                commit_id = Commit.objects.get(vcs_system_id=vcs.id, revision_hash=revision_hash).id
-            except Commit.DoesNotExist:
-                pass
-        return commit_id
