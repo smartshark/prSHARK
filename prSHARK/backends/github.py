@@ -10,6 +10,11 @@ from pycoshark.mongomodels import VCSSystem, Commit, PullRequest, People, PullRe
 
 
 class Github():
+    """Github Pull Request API connector
+
+    This is similiar to the issueSHARK github backend only that this fetches pull requests instead of issues.
+    However, since every pull request is an issue in github we also fetch events and comments from the issue endpoint.
+    """
 
     def __init__(self, config, project, pull_request_system):
         self.config = config
@@ -71,15 +76,11 @@ class Github():
         """Changes API url for pull request commit to repository url.
             https://api.github.com/repos/octocat/Hello-World/commits/6dcb09b5b57875f334f61aebed695e2e4193db5e
             ->
-            https://github.com/repos/octocat
+            https://github.com/octocat/Hello-World
         """
         url = api_url.replace('https://api.github.com/repos', 'github.com')
         url = '/'.join(url.split('/')[:3])
         return 'https://' + url
-
-    def _get_pr_commit_id(self, pull_request_id, commit_sha):
-        prc = PullRequestCommit.objects.get(pull_request_id=pull_request_id, commit_sha=commit_sha)
-        return prc.id
 
     def _get_person(self, user_url):
         """
@@ -109,6 +110,10 @@ class Github():
         return people_id
 
     def _fetch_all_pages(self, base_url):
+        """Convenience method that fetches all available data from all pages.
+        
+        :param base_url: url to the github API (should support pagination)
+        """
         ret = []
         page = 1
         url = '{}&page={}&per_page=100'.format(base_url, page)
@@ -128,37 +133,63 @@ class Github():
         return dat
 
     def run(self):
+        """Executes the complete workflow, fetches all data and saves it into the MongoDB."""
         self.parse_pr_list(self.fetch_pr_list())
 
     def fetch_comment_list(self, pr_number):
-        """Pull request comments are extracted via the issues endpoint in Github."""
+        """Pull request comments are extracted via the issues endpoint in Github.
+        Each pull request is also an issue in Github.
+
+        :param pr_number: pull request number for which we fetch the issue comments
+        """
         base_url = self.config.tracking_url.replace('/pulls', '/issues')
         url = '{}/{}/comments?'.format(base_url, pr_number)
         return self._fetch_all_pages(url)
 
     def fetch_event_list(self, pr_number):
-        """Pull request events are extracted via the issues endpoint in Github."""
+        """Pull request events are extracted via the issues endpoint in Github.
+
+        :param pr_number: pull request number for which we fetch the issue events
+        """
         base_url = self.config.tracking_url.replace('/pulls', '/issues')
         url = '{}/{}/events?'.format(base_url, pr_number)
         return self._fetch_all_pages(url)
 
     def fetch_pr_list(self):
+        """Fetch complete list of pull requests for this the url passed on the command line."""
         url = '{}?'.format(self.config.tracking_url)  # this is where we would put since=last_updated_at if it would be supported by the github api
         return self._fetch_all_pages(url)
 
     def fetch_review_list(self, pr_number):
+        """Fetch pull request reviews
+        
+        :param pr_number: pull request number for which to fetch reviews
+        """
         url = '{}/{}/reviews?'.format(self.config.tracking_url, pr_number)
         return self._fetch_all_pages(url)
 
     def fetch_review_comment_list(self, pr_number, review_number):
+        """"Fetch pull request review comments
+
+        :param pr_number: pull request number for which to fetch review comments
+        :param review_number: review number for which to fetch review comments
+        """
         url = '{}/{}/reviews/{}/comments?'.format(self.config.tracking_url, pr_number, review_number)
         return self._fetch_all_pages(url)
 
     def fetch_commit_list(self, pr_number):
+        """Fetch pull request commits
+
+        :param pr_number: pull request number for which to fetch commits
+        """
         url = '{}/{}/commits?'.format(self.config.tracking_url, pr_number)
         return self._fetch_all_pages(url)
 
     def fetch_file_list(self, pr_number):
+        """Fetch pull request files
+
+        :param pr_number: pull request number for which to fetch files
+        """
         url = '{}/{}/files?'.format(self.config.tracking_url, pr_number)
         return self._fetch_all_pages(url)
 
@@ -167,6 +198,7 @@ class Github():
         We are saving all mongo objects here.
         """
         for pr in prs:
+            self._log.info('saving pull request %s', pr['number'])
             try:
                 mongo_pr = PullRequest.objects.get(pull_request_system_id=self._prs.id, external_id=str(pr['number']))
             except PullRequest.DoesNotExist:
@@ -196,8 +228,6 @@ class Github():
 
             # head = fork, source of pull
             # base = target of pull, this should be in our data already
-            # target = pr['base']['repo']['full_name'] + ':' + pr['base']['ref']  # apache/commons-validator:master
-            # source = pr['head']['repo']['full_name'] + ':' + pr['head']['ref']  # apache/commons-validator:master
 
             mongo_pr.source_repo_url = 'https://github.com/' + pr['head']['repo']['full_name']
             mongo_pr.source_branch = pr['head']['ref']
@@ -215,7 +245,6 @@ class Github():
             for u in pr['requested_reviewers']:
                 mongo_pr.requested_reviewer_ids.append(self._get_person(u['url']))
 
-            # author_association
             for lbl in pr['labels']:
                 mongo_pr.labels.append(lbl['name'])
             mongo_pr.save()
