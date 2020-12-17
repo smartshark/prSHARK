@@ -46,7 +46,7 @@ def main(args):
         log.error('Project %s not found!', cfg.project_name)
         sys.exit(1)
 
-    # Create issue system if not already there
+    # Create pull request system if not already there
     try:
         pr_system = PullRequestSystem.objects.get(url=cfg.tracking_url, project_id=project.id)
     except PullRequestSystem.DoesNotExist:
@@ -59,9 +59,12 @@ def main(args):
         from prSHARK.backends.github import Github
         gh = Github(cfg, project, pr_system)
         gh.run()
+    else:
+        log.error('Backend %s not implemented', args.backend)
+        sys.exit(1)
 
     end = timeit.default_timer() - start
-    log.info("Finished data extraction in {:.5f}s".format(end))
+    log.info('Finished data extraction in {:.5f}s'.format(end))
 
 
 if __name__ == '__main__':
