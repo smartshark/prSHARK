@@ -71,7 +71,7 @@ if __name__ == '__main__':
     available_backends = ('github')
     parser = get_base_argparser('Collects information from pull requests', '0.0.0')
     parser.add_argument('-i', '--prurl', help='URL to the pull request system.', required=True)
-    parser.add_argument('-pn', '--project_name', help='Name of the project.', required=True)
+    parser.add_argument('-pn', '--project-name', help='Name of the project.', required=True)
     parser.add_argument('-b', '--backend', help='Backend to use for the parsing', default='github', choices=available_backends)
     parser.add_argument('-t', '--token', help='Token for accessing.', default=None)
 
@@ -79,8 +79,8 @@ if __name__ == '__main__':
     parser.add_argument('-PP', '--proxy-port', help='Port of the proxy to use.', default=None)
     parser.add_argument('-Pp', '--proxy-password', help='Password to use the proxy (HTTP Basic Auth)', default=None)
     parser.add_argument('-PU', '--proxy-user', help='Username to use the proxy (HTTP Basic Auth)', default=None)
-    parser.add_argument('-iU', '--issue-user', help='Username to use the issue tracking system', default=None)
-    parser.add_argument('-iP', '--issue-password', help='Password to use the issue tracking system', default=None)
+    parser.add_argument('-iU', '--issue-user', help='Username to use the pull request system', default=None)
+    parser.add_argument('-iP', '--issue-password', help='Password to use the pull request system', default=None)
 
-    parser.add_argument('-ll', '--log_level', help='Log level for stdout (DEBUG, INFO), default INFO', default='INFO', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'])
+    parser.add_argument('-ll', '--log-level', help='Log level for stdout (DEBUG, INFO), default INFO', default='INFO', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'])
     main(parser.parse_args())

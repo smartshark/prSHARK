@@ -97,7 +97,7 @@ class Github():
                 continue
             try:
                 commit_id = Commit.objects.get(vcs_system_id=vcs.id, revision_hash=revision_hash).id
-            except Commit.DoesNotExist:
+            except Commit.DoesNotExist:  # happens for deleted branches of force pushes, e.g. https://github.com/ravibpatel/AutoUpdater.NET/commit/8dd52654733d688b0111064fd1a841f6769dc082
                 pass
         return commit_id
 
@@ -127,6 +127,26 @@ class Github():
             email=email
         ).upsert_one(name=name, email=email, username=raw_user['login']).id
         self._people[user_url] = people_id
+        return people_id
+
+    def _get_person_without_url(self, name, email):
+        """
+        Gets the person via the name and email
+
+        Sometimes the github api does not have user urls, in that case we only have a name and email
+
+        :param name: name of the user 
+        :param email: email of the user
+        :return: people_id from MongoDB
+        """
+
+        if email is None:
+            email = 'null'
+
+        people_id = People.objects(
+            name=name,
+            email=email
+        ).upsert_one(name=name, email=email).id
         return people_id
 
     def _fetch_all_pages(self, base_url):
@@ -177,7 +197,7 @@ class Github():
 
     def fetch_pr_list(self):
         """Fetch complete list of pull requests for this the url passed on the command line."""
-        url = '{}?'.format(self.config.tracking_url)  # this is where we would put since=last_updated_at if it would be supported by the github api
+        url = '{}?state=all'.format(self.config.tracking_url)  # this is where we would put since=last_updated_at if it would be supported by the github api
         return self._fetch_all_pages(url)
 
     def fetch_review_list(self, pr_number):
@@ -248,10 +268,15 @@ class Github():
             # head = fork, source of pull
             # base = target of pull, this should be in our data already
 
-            mongo_pr.source_repo_url = 'https://github.com/' + pr['head']['repo']['full_name']
+            # repo is sometimes null, if it is we can only link to the repository page of the user but that would not be a repo_url
+            # also, sometimes even that is not available
+            if pr['head']['repo'] and 'full_name' in pr['head']['repo'].keys():
+                mongo_pr.source_repo_url = 'https://github.com/' + pr['head']['repo']['full_name']
+
             mongo_pr.source_branch = pr['head']['ref']
             mongo_pr.source_commit_sha = pr['head']['sha']
-            mongo_pr.source_commit_id = self._get_commit_id(pr['head']['sha'], mongo_pr.source_repo_url)
+            if mongo_pr.source_repo_url:
+                mongo_pr.source_commit_id = self._get_commit_id(pr['head']['sha'], mongo_pr.source_repo_url)
 
             mongo_pr.target_repo_url = 'https://github.com/' + pr['base']['repo']['full_name']
             mongo_pr.target_branch = pr['base']['ref']
@@ -269,6 +294,45 @@ class Github():
             for lbl in pr['labels']:
                 mongo_pr.labels.append(lbl['name'])
             mongo_pr.save()
+
+            # pr commits
+            for pr_commit in self.fetch_commit_list(pr['number']):
+                try:
+                    mongo_pr_commit = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=pr_commit['sha'])
+                except PullRequestCommit.DoesNotExist:
+                    mongo_pr_commit = PullRequestCommit(pull_request_id=mongo_pr.id, commit_sha=pr_commit['sha'])
+
+                # author and commiter urls are not always present, sometimes we only have a username and an email but no login
+                if pr_commit['author'] and 'url' in pr_commit['author'].keys():
+                    mongo_pr_commit.author_id = self._get_person(pr_commit['author']['url'])
+                else:
+                    mongo_pr_commit.author_id = self._get_person_without_url(pr_commit['commit']['author']['name'], pr_commit['commit']['author']['email']) 
+
+                if pr_commit['committer'] and 'url' in pr_commit['committer'].keys():
+                    mongo_pr_commit.committer_id = self._get_person(pr_commit['committer']['url'])
+                else:
+                    mongo_pr_commit.commiter_id = self._get_person_without_url(pr_commit['commit']['committer']['name'], pr_commit['commit']['committer']['email']) 
+
+                mongo_pr_commit.parents = [p['sha'] for p in pr_commit['parents']]
+                mongo_pr_commit.message = pr_commit['commit']['message']
+                mongo_pr_commit.commit_repo_url = self._get_repo_url(pr_commit['url'])
+                mongo_pr_commit.commit_id = self._get_commit_id(mongo_pr_commit.commit_sha, mongo_pr_commit.commit_repo_url)
+                mongo_pr_commit.save()
+
+            # pr files, sha is not a link to PullRequestCommit, maybe its the file hash
+            for pr_file in self.fetch_file_list(pr['number']):
+                try:
+                    mongo_pr_file = PullRequestFile.objects.get(pull_request_id=mongo_pr.id, sha=pr_file['sha'], path=pr_file['filename'])
+                except PullRequestFile.DoesNotExist:
+                    mongo_pr_file = PullRequestFile(pull_request_id=mongo_pr.id, sha=pr_file['sha'], path=pr_file['filename'])
+
+                mongo_pr_file.status = pr_file['status']
+                mongo_pr_file.additions = pr_file['additions']
+                mongo_pr_file.deletions = pr_file['deletions']
+                mongo_pr_file.changes = pr_file['changes']
+                if 'patch' in pr_file.keys():
+                    mongo_pr_file.patch = pr_file['patch']
+                mongo_pr_file.save()
 
             # pull request reviews
             for prr in self.fetch_review_list(pr['number']):
@@ -293,6 +357,9 @@ class Github():
                         mongo_prrc = PullRequestReviewComment(pull_request_review_id=mongo_prr.id, external_id=str(prrc['id']))
 
                     mongo_prrc.diff_hunk = prrc['diff_hunk']
+
+                    # we do not link to PullRequestFile here because
+                    # PullRequestFile is sometimes missing, maybe the file is no longer part of current file list after a commit to the pull request
                     mongo_prrc.path = prrc['path']
                     mongo_prrc.position = prrc['position']
                     mongo_prrc.original_position = prrc['original_position']
@@ -305,13 +372,43 @@ class Github():
 
                     mongo_prrc.commit_sha = prrc['commit_id']
                     mongo_prrc.original_commit_sha = prrc['original_commit_id']
+                    
+                    # we link the PullRequestCommits directly if we can
+                    try:
+                        n_prc = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=mongo_prrc.commit_sha)
+                        mongo_prrc.pull_request_commit_id = n_prc.id
 
-                    mongo_prrc.start_line = prrc['start_line']
-                    mongo_prrc.original_start_line = prrc['original_start_line']
-                    mongo_prrc.start_side = prrc['start_side']
-                    mongo_prrc.line = prrc['line']
-                    mongo_prrc.original_line = prrc['original_line']
-                    mongo_prrc.side = prrc['side']
+                        if n_prc.commit_id:
+                            self._log.info('found lokal commit link')
+                        else:
+                            self._log.info('no link to local commit for %s from %s', n_prc.commit_sha, n_prc.commit_repo_url)
+                    except PullRequestCommit.DoesNotExist:
+                        pass
+
+                    try:
+                        n2_prc = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=mongo_prrc.original_commit_sha)
+                        mongo_prrc.original_pull_request_commit_id = n2_prc.id
+
+                        if n2_prc.commit_id:
+                            self._log.info('found lokal commit link')
+                        else:
+                            self._log.info('no link to local commit for %s from %s', n2_prc.commit_sha, n2_prc.commit_repo_url)
+                    except PullRequestCommit.DoesNotExist:
+                        pass
+
+                    # some recent additions to the api, may not be available yet
+                    if 'start_line' in prrc.keys():
+                        mongo_prrc.start_line = prrc['start_line']
+                    if 'original_start_line' in prrc.keys():
+                        mongo_prrc.original_start_line = prrc['original_start_line']
+                    if 'start_side' in prrc.keys():
+                        mongo_prrc.start_side = prrc['start_side']
+                    if 'line' in prrc.keys():
+                        mongo_prrc.line = prrc['line']
+                    if 'original_line' in prrc.keys():
+                        mongo_prrc.original_line = prrc['original_line']
+                    if 'side' in prrc.keys():
+                        mongo_prrc.side = prrc['side']
 
                     if 'in_reply_to_id' in prrc.keys() and prrc['in_reply_to_id']:
                         try:
@@ -322,34 +419,6 @@ class Github():
                         mongo_prrc.in_reply_to_id = ref_prrc.id
                     mongo_prrc.save()
 
-            # pr commits
-            for pr_commit in self.fetch_commit_list(pr['number']):
-                try:
-                    mongo_pr_commit = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=pr_commit['sha'])
-                except PullRequestCommit.DoesNotExist:
-                    mongo_pr_commit = PullRequestCommit(pull_request_id=mongo_pr.id, commit_sha=pr_commit['sha'])
-
-                mongo_pr_commit.author_id = self._get_person(pr_commit['author']['url'])
-                mongo_pr_commit.committer_id = self._get_person(pr_commit['committer']['url'])
-                mongo_pr_commit.parents = [p['sha'] for p in pr_commit['parents']]
-                mongo_pr_commit.message = pr_commit['commit']['message']
-                mongo_pr_commit.commit_repo_url = self._get_repo_url(pr_commit['url'])
-                mongo_pr_commit.commit_id = self._get_commit_id(mongo_pr_commit.commit_sha, mongo_pr_commit.commit_repo_url)
-                mongo_pr_commit.save()
-
-            # pr files, sha is not a link to PullRequestCommit, maybe its the file hash
-            for pr_file in self.fetch_file_list(pr['number']):
-                try:
-                    mongo_pr_file = PullRequestFile.objects.get(pull_request_id=mongo_pr.id, sha=pr_file['sha'], path=pr_file['filename'])
-                except PullRequestFile.DoesNotExist:
-                    mongo_pr_file = PullRequestFile(pull_request_id=mongo_pr.id, sha=pr_file['sha'], path=pr_file['filename'])
-
-                mongo_pr_file.status = pr_file['status']
-                mongo_pr_file.additions = pr_file['additions']
-                mongo_pr_file.deletions = pr_file['deletions']
-                mongo_pr_file.changes = pr_file['changes']
-                mongo_pr_file.patch = pr_file['patch']
-                mongo_pr_file.save()
 
             # comments outside of reviews
             for c in self.fetch_comment_list(pr['number']):
@@ -377,10 +446,9 @@ class Github():
                 mongo_pre.event_type = e['event']
                 
                 if e['commit_id']:
-                    print(e['commit_id'], 'in', self._get_repo_url(e['url']))
-                    mongo_pre.commit_id = self._get_commit_id(e['commit_id'], self._get_repo_url(e['url']))
+                    mongo_pre.commit_id = self._get_commit_id(e['commit_id'], self._get_repo_url(e['commit_url']))
                     mongo_pre.commit_sha = e['commit_id']
-                    mongo_pre.commit_repo_url = self._get_repo_url(e['url'])
+                    mongo_pre.commit_repo_url = self._get_repo_url(e['commit_url'])
 
                 # remove all common attributes then store excess as additional_data
                 ad = copy.deepcopy(e)
