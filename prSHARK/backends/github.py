@@ -59,7 +59,7 @@ class Github():
                     now = datetime.datetime.now()
 
                     # Then we substract and add 10 seconds to it (so that we do not request directly at the threshold
-                    waiting_time = ((time_when_reset-now).total_seconds())+10
+                    waiting_time = ((time_when_reset - now).total_seconds()) + 10
 
                     self._log.info("Github API limit exceeded. Waiting for %0.5f seconds...", waiting_time)
                     time.sleep(waiting_time)
@@ -84,7 +84,7 @@ class Github():
 
     def _get_commit_id(self, revision_hash, repo_url):
         """Links revision_hash and repo_url to existing commits within our MongoDB.
-        
+
         We require the repo_url because the revision_hash is only unique within one repository.
 
         :param revision_hash: commit sha for which to fetch the commit id
@@ -135,7 +135,7 @@ class Github():
 
         Sometimes the github api does not have user urls, in that case we only have a name and email
 
-        :param name: name of the user 
+        :param name: name of the user
         :param email: email of the user
         :return: people_id from MongoDB
         """
@@ -201,7 +201,7 @@ class Github():
         return self._fetch_all_pages(url)
 
     def fetch_review_list(self, pr_number):
-        """Fetch pull request review 
+        """Fetch pull request review
 
         :param pr_number: pull request number for which to fetch reviews
         """
@@ -306,12 +306,12 @@ class Github():
                 if pr_commit['author'] and 'url' in pr_commit['author'].keys():
                     mongo_pr_commit.author_id = self._get_person(pr_commit['author']['url'])
                 else:
-                    mongo_pr_commit.author_id = self._get_person_without_url(pr_commit['commit']['author']['name'], pr_commit['commit']['author']['email']) 
+                    mongo_pr_commit.author_id = self._get_person_without_url(pr_commit['commit']['author']['name'], pr_commit['commit']['author']['email'])
 
                 if pr_commit['committer'] and 'url' in pr_commit['committer'].keys():
                     mongo_pr_commit.committer_id = self._get_person(pr_commit['committer']['url'])
                 else:
-                    mongo_pr_commit.commiter_id = self._get_person_without_url(pr_commit['commit']['committer']['name'], pr_commit['commit']['committer']['email']) 
+                    mongo_pr_commit.commiter_id = self._get_person_without_url(pr_commit['commit']['committer']['name'], pr_commit['commit']['committer']['email'])
 
                 mongo_pr_commit.parents = [p['sha'] for p in pr_commit['parents']]
                 mongo_pr_commit.message = pr_commit['commit']['message']
@@ -345,7 +345,7 @@ class Github():
                 mongo_prr.description = prr['body']
                 mongo_prr.submitted_at = dateutil.parser.parse(prr['submitted_at'])
                 mongo_prr.commit_sha = prr['commit_id']
-                
+
                 try:
                     n0_prc = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=mongo_prr.commit_sha)
                     mongo_prr.pull_request_commit_id = n0_prc.id
@@ -379,7 +379,7 @@ class Github():
 
                     mongo_prrc.commit_sha = prrc['commit_id']
                     mongo_prrc.original_commit_sha = prrc['original_commit_id']
- 
+
                     # we link the PullRequestCommits directly if we can
                     try:
                         n1_prc = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=mongo_prrc.commit_sha)
@@ -416,7 +416,6 @@ class Github():
                         mongo_prrc.in_reply_to_id = ref_prrc.id
                     mongo_prrc.save()
 
-
             # comments outside of reviews
             for c in self.fetch_comment_list(pr['number']):
                 try:
@@ -441,7 +440,7 @@ class Github():
                 mongo_pre.author_id = self._get_person(e['actor']['url'])
                 mongo_pre.created_at = dateutil.parser.parse(e['created_at'])
                 mongo_pre.event_type = e['event']
-                
+
                 if e['commit_id']:
                     mongo_pre.commit_id = self._get_commit_id(e['commit_id'], self._get_repo_url(e['commit_url']))
                     mongo_pre.commit_sha = e['commit_id']
@@ -459,4 +458,3 @@ class Github():
                 del ad['created_at']
                 mongo_pre.additional_data = ad
                 mongo_pre.save()
-

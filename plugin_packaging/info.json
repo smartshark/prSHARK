@@ -174,14 +174,14 @@
             "description": "debug level (DEBUG, INFO, ERROR, WARNING)"
         },
         {
-            "name": "pr_user",
+            "name": "issue_user",
             "required": false,
             "position": 17,
             "type": "execute",
             "description": "username to use the pull request system"
         },
         {
-            "name": "pr_password",
+            "name": "issue_password",
             "required": false,
             "position": 18,
             "type": "execute",
