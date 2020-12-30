@@ -226,7 +226,7 @@
                "reference_to": "commit",
                "field_name":"target_commit_id",
                "desc": "ID of the commit, only available if the commit is in the commit collection (is part of the repository, e.g., pull request from a feature branch to master of the same repository)."
-            },
+            }
          ],
          "desc": "This collection stores pull requests",
          "collection_name":"pull_request"
@@ -567,7 +567,7 @@
                "type":"StructType",
                "logical_type":"Nested",
                "field_name":"additional_data",
-               "desc": "Contains all data of this event that is not common with all events.",
+               "desc": "Contains all data of this event that is not common with all events."
             }
          ],
          "desc": "This collection holds general pull request events.",

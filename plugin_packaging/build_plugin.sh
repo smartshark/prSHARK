@@ -2,6 +2,7 @@
 
 current=`pwd`
 mkdir -p /tmp/prSHARK/
+cp * /tmp/prSHARK/
 cp -R ../prSHARK /tmp/prSHARK/
 cp ../setup.py /tmp/prSHARK/
 cp ../smartshark_plugin.py /tmp/prSHARK/
