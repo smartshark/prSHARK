@@ -150,97 +150,83 @@
                "field_name":"assignee_id",
                "desc": "ObjectID that links to an entry in the people collection, which is the assignee of the pull request"
             },
-            
             {
-               "type":"StringType",
-               "logical_type":"Name",
-               "field_name":"issue_type",
-               "desc": "Issue type (e.g. Bug, Enhancement, etc.)"
-            },
-            {
-               "type":"StringType",
-               "logical_type":"Name",
-               "field_name":"priority",
-               "desc": "Priority of the issue (e.g., major, minor)"
-            },
-            {
-               "type":"StringType",
-               "logical_type":"Name",
-               "field_name":"status",
-               "desc": "Status of the issue (e.g. RESOLVED, NEW)"
-            },
-            {
-               "sub_type": "StringType",
+               "sub_type": "ObjectIdType",
                "type":"ArrayType",
-               "logical_type":"Name",
-               "field_name":"affects_versions",
-               "desc": "List of versions that are affected by this issue"
+               "logical_type":"RID",
+               "field_name":"linked_user_ids",
+               "desc": "ObjectID list of users linked to this pull request"
             },
             {
-               "sub_type": "StringType",
+               "sub_type": "ObjectIdType",
                "type":"ArrayType",
+               "logical_type":"RID",
+               "field_name":"requested_reviewer_ids",
+               "desc": "ObjectID list of users which were requested to reivew this pull request"
+            },
+            {
+               "type":"StringType",
                "logical_type":"Name",
-               "field_name":"components",
-               "desc": "List of components that are affected by this issue"
+               "field_name":"state",
+               "desc": "state of this pull request, e.g., merged, closed"
             },
             {
                "sub_type": "StringType",
                "type":"ArrayType",
                "logical_type":"Name",
                "field_name":"labels",
-               "desc": "List of labels with which this issue is labled"
+               "desc": "List of labels for this pull request"
             },
             {
                "type":"StringType",
                "logical_type":"Name",
-               "field_name":"resolution",
-               "desc": "Resolution of the issue (if available)"
-            },
-            {
-               "sub_type": "StringType",
-               "type":"ArrayType",
-               "logical_type":"Name",
-               "field_name":"fix_versions",
-               "desc": "List of versions with which the issue was fixed"
-            },
-            {
-               "type":"ObjectIdType",
-               "logical_type":"RID",
-               "reference_to": "people",
-               "field_name":"assignee_id",
-               "desc": "ObjectID that links to an entry in the people collection, which is the assignee of the issue"
-            },
-            {
-               "type":"ObjectIdType",
-               "logical_type":"RID",
-               "reference_to": "issue",
-               "field_name":"parent_issue_id",
-               "desc": "ObjectID that links to a parent issue (if available)"
-            },
-            {
-               "type":"IntegerType",
-               "logical_type":"Name",
-               "field_name":"original_time_estimate",
-               "desc": "Original estimation of the needed time to fix the issue (if available)"
+               "field_name":"source_repo_url",
+               "desc": "URL to source repository of this pull request, can be a fork"
             },
             {
                "type":"StringType",
                "logical_type":"Name",
-               "field_name":"environment",
-               "desc": "Environment which is affected by the issue"
+               "field_name":"source_branch",
+               "desc": "Name of the source branch of this pull request"
             },
             {
-               "type": "StringType",
-               "logical_type": "Name",
-               "field_name": "platform",
-               "desc": "Platform which is affected by the issue (e.g. Windows)"
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"source_commit_sha",
+               "desc": "Revision hash of the source commit"
             },
             {
-               "type": "BooleanType",
-               "logical_type": "Other",
-               "field_name": "is_pull_request",
-               "desc": "True if this issue is also a pull request, e.g., for Github."
-            }
+               "type":"ObjectIdType",
+               "logical_type":"RID",
+               "reference_to": "commit",
+               "field_name":"source_commit_id",
+               "desc": "ID of the commit, only available if the commit is in the commit collection (is part of the repository, e.g., pull request from a feature branch to master of the same repository)."
+            },
+            {
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"target_repo_url",
+               "desc": "URL to target repository of this pull request, can be a fork"
+            },
+            {
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"target_branch",
+               "desc": "Name of the target branch of this pull request"
+            },
+            {
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"target_commit_sha",
+               "desc": "Revision hash of the target commit"
+            },
+            {
+               "type":"ObjectIdType",
+               "logical_type":"RID",
+               "reference_to": "commit",
+               "field_name":"target_commit_id",
+               "desc": "ID of the commit, only available if the commit is in the commit collection (is part of the repository, e.g., pull request from a feature branch to master of the same repository)."
+            },
          ],
          "desc": "This collection stores pull requests",
          "collection_name":"pull_request"
@@ -257,14 +243,243 @@
                "type":"IntegerType",
                "logical_type":"ID",
                "field_name":"external_id",
-               "desc": "ExternalID of the issue that was given to it from the original issue tracking system"
+               "desc": "ExternalID of the review that was given to it from the original pull request system"
+            },
+            {  
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"state",
+               "desc": "State of the review"
+            },
+            {  
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"description",
+               "desc": "Description for this review."
             },
             {  
                "type":"ObjectIdType",
                "logical_type":"RID",
-               "reference_to": "issue",
-               "field_name":"issue_id",
-               "desc": "ObjectID of the issue to which this comment belongs"
+               "reference_to": "people",
+               "field_name":"creator_id",
+               "desc": "ObjectID that links to an entry in the people collection, which is the creator of this review"
+            },
+            {  
+               "type":"DateType",
+               "logical_type":"Date",
+               "field_name":"submitted_at",
+               "desc": "Date on which the review was submitted"
+            },
+            {  
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"description",
+               "desc": "Description for this review."
+            },
+            {  
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"author_association",
+               "desc": "Author association"
+            },
+            {  
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"commit_sha",
+               "desc": "Commit revision this review is based on."
+            },
+            {  
+               "type":"ObjectIdType",
+               "logical_type":"RID",
+               "reference_to": "pull_request_commit",
+               "field_name":"pull_request_commit_id",
+               "desc": "ObjectID of the commit this review is based on (only if it exists)."
+            }
+         ],
+         "desc": "This collection holds reviews for pull requests",
+         "collection_name":"pull_request_review"
+      },
+      {  
+         "fields":[  
+            {  
+               "type":"ObjectIdType",
+               "logical_type":"OID",
+               "field_name":"_id",
+               "desc": "Identifier of the document"
+            },
+            {  
+               "type":"ObjectIdType",
+               "logical_type":"RID",
+               "reference_to": "pull_request_review",
+               "field_name":"pull_request_review_id",
+               "desc": "ObjectID that links to the pull request review this comment belongs to"
+            },
+            {  
+               "type":"IntegerType",
+               "logical_type":"ID",
+               "field_name":"external_id",
+               "desc": "ExternalID of the comment that was given to it from the original pull request system"
+            },
+            {  
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"comment",
+               "desc": "Comment text"
+            },
+            {  
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"author_association",
+               "desc": "Author association"
+            },
+            {  
+               "type":"ObjectIdType",
+               "logical_type":"RID",
+               "reference_to": "pull_request_review_comment",
+               "field_name":"in_reply_to_id",
+               "desc": "ObjectID of the pull request review comment this comment answers"
+            },
+            {  
+               "type":"ObjectIdType",
+               "logical_type":"RID",
+               "reference_to": "people",
+               "field_name":"creator_id",
+               "desc": "ObjectID that links to an entry in the people collection, which is the creator of this review comment"
+            },
+            {  
+               "type":"DateType",
+               "logical_type":"Date",
+               "field_name":"created_at",
+               "desc": "Date on which the review comment was created"
+            },
+            {  
+               "type":"DateType",
+               "logical_type":"Date",
+               "field_name":"updated_at",
+               "desc": "Date on which the review comment was updated"
+            },
+            {  
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"path",
+               "desc": "Filename this review comment references (if any)"
+            },
+            {  
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"diff_hunk",
+               "desc": "Hunk this review comment references (if any)"
+            },
+            {  
+               "type":"IntegerType",
+               "logical_type":"Name",
+               "field_name":"position",
+               "desc": "Line number this review comment references (if any)"
+            },
+            {  
+               "type":"IntegerType",
+               "logical_type":"Name",
+               "field_name":"original_position",
+               "desc": "Original line number this review comment references (if any)"
+            },
+            {  
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"commit_sha",
+               "desc": "Commit revision this review coment is based on"
+            },
+            {  
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"original_commit_sha",
+               "desc": "Original commit revision this review coment is based on"
+            },
+            {  
+               "type":"ObjectIdType",
+               "logical_type":"RID",
+               "reference_to": "pull_request_commit",
+               "field_name":"pull_request_commit_id",
+               "desc": "ObjectID of the commit this review comment is based on (only if it exists)."
+            },
+            {  
+               "type":"ObjectIdType",
+               "logical_type":"RID",
+               "reference_to": "pull_request_commit",
+               "field_name":"original_pull_request_commit_id",
+               "desc": "ObjectID of the original commit this review comment is based on (only if it exists)."
+            },
+            {  
+               "type":"IntegerType",
+               "logical_type":"Name",
+               "field_name":"start_line",
+               "desc": "Start line number this review comment references (if any)"
+            },
+            {  
+               "type":"IntegerType",
+               "logical_type":"Name",
+               "field_name":"original_start_line",
+               "desc": "Original start line number this review comment references (if any)"
+            },
+            {  
+               "type":"IntegerType",
+               "logical_type":"Name",
+               "field_name":"line",
+               "desc": "Line number this review comment references (if any)"
+            },
+            {  
+               "type":"IntegerType",
+               "logical_type":"Name",
+               "field_name":"original_line",
+               "desc": "Original line number this review comment references (if any)"
+            },
+            {  
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"start_side",
+               "desc": "Start side of the review (right, left)"
+            },
+            {
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"side",
+               "desc": "Start side of the review (right, left)"
+            }
+         ],
+         "desc": "This collection holds comments for pull request reviews",
+         "collection_name":"pull_request_review_comment"
+      },
+      {  
+         "fields":[  
+            {
+               "type":"ObjectIdType",
+               "logical_type":"OID",
+               "field_name":"_id",
+               "desc": "Identifier of the document"
+            },
+            {
+               "type":"ObjectIdType",
+               "logical_type":"RID",
+               "reference_to": "pull_request",
+               "field_name":"pull_request_id",
+               "desc": "ObjectID that links to the pull request this comment belongs to"
+            },
+            {
+               "type":"IntegerType",
+               "logical_type":"ID",
+               "field_name":"external_id",
+               "desc": "ExternalID of the review that was given to it from the original pull request system"
+            },
+            {  
+               "type":"DateType",
+               "logical_type":"Date",
+               "field_name":"created_at",
+               "desc": "Date on which the comment was created"
+            },
+            {  
+               "type":"DateType",
+               "logical_type":"Date",
+               "field_name":"updated_at",
+               "desc": "Date on which the comment was updated"
             },
             {  
                "type":"ObjectIdType",
@@ -277,73 +492,212 @@
                "type":"StringType",
                "logical_type":"Name",
                "field_name":"comment",
-               "desc": "Actual comment body"
+               "desc": "The pull request comment text"
+            },
+            {  
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"author_association",
+               "desc": "Author association"
+            }
+         ],
+         "desc": "This collection holds general pull request comments.",
+         "collection_name":"pull_request_comment"
+      },
+      {  
+         "fields":[  
+            {
+               "type":"ObjectIdType",
+               "logical_type":"OID",
+               "field_name":"_id",
+               "desc": "Identifier of the document"
+            },
+            {
+               "type":"ObjectIdType",
+               "logical_type":"RID",
+               "reference_to": "pull_request",
+               "field_name":"pull_request_id",
+               "desc": "ObjectID that links to the pull request this comment belongs to"
+            },
+            {
+               "type":"IntegerType",
+               "logical_type":"ID",
+               "field_name":"external_id",
+               "desc": "ExternalID of the event that was given to it from the original pull request system"
             },
             {  
                "type":"DateType",
                "logical_type":"Date",
                "field_name":"created_at",
                "desc": "Date on which the comment was created"
-            }
-         ],
-         "desc": "This collection holds all comments to all issues",
-         "collection_name":"issue_comment"
-      },
-      {  
-         "fields":[  
-            {  
-               "type":"ObjectIdType",
-               "logical_type":"OID",
-               "field_name":"_id",
-               "desc": "Identifier of the document"
-            },
-            {  
-               "type":"StringType",
-               "logical_type":"ID",
-               "field_name":"external_id",
-               "desc": "ExternalID of the issue that was given to it from the original issue tracking system"
-            },
-            {  
-               "type":"ObjectIdType",
-               "logical_type":"RID",
-               "reference_to": "issue",
-               "field_name":"issue_id",
-               "desc": "ObjectID of the issue to which this event belongs"
-            },
-            {  
-               "type":"DateType",
-               "logical_type":"Date",
-               "field_name":"created_at",
-               "desc": "Date on which this event took place"
-            },
-            {  
-               "type":"StringType",
-               "logical_type":"Name",
-               "field_name":"status",
-               "desc": "Status of the event. E.g., 'title' means, that the title of the issue was changed"
             },
             {  
                "type":"ObjectIdType",
                "logical_type":"RID",
                "reference_to": "people",
                "field_name":"author_id",
-               "desc": "ObjectID that links to an entry in the people collection, which is the author of this event"
+               "desc": "ObjectID that links to an entry in the people collection, which is the author of this comment"
+            },
+            {  
+               "type":"ObjectIdType",
+               "logical_type":"RID",
+               "reference_to": "commit",
+               "field_name":"commit_id",
+               "desc": "ObjectID that links to the commit if it is in the commit collection"
             },
             {  
                "type":"StringType",
                "logical_type":"Name",
-               "field_name":"old_value",
-               "desc": "Old value of the issue at this time of the changed field"
+               "field_name":"commit_sha",
+               "desc": "Revision hash of the commit linked to this event (if any)"
             },
             {  
                "type":"StringType",
                "logical_type":"Name",
-               "field_name":"new_value",
-               "desc": "New value of the issue after the event"
+               "field_name":"commit_repo_url",
+               "desc": "Repository url of the commit linked to this event (if any)"
+            },
+            {  
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"event_type",
+               "desc": "Type of event"
+            },
+            {  
+               "type":"StructType",
+               "logical_type":"Nested",
+               "field_name":"additional_data",
+               "desc": "Contains all data of this event that is not common with all events.",
             }
          ],
-         "desc": "This collection contains all events on all issues that were collected. An event is an action like the changing of a title or similar",
-         "collection_name":"event"
+         "desc": "This collection holds general pull request events.",
+         "collection_name":"pull_request_event"
+      },
+      {  
+         "fields":[  
+            {
+               "type":"ObjectIdType",
+               "logical_type":"OID",
+               "field_name":"_id",
+               "desc": "Identifier of the document"
+            },
+            {
+               "type":"ObjectIdType",
+               "logical_type":"RID",
+               "reference_to": "pull_request",
+               "field_name":"pull_request_id",
+               "desc": "ObjectID that links to the pull request this commit belongs to"
+            },
+            {  
+               "type":"ObjectIdType",
+               "logical_type":"RID",
+               "reference_to": "people",
+               "field_name":"author_id",
+               "desc": "ObjectID that links to an entry in the people collection, which is the author of this commit"
+            },
+            {  
+               "type":"ObjectIdType",
+               "logical_type":"RID",
+               "reference_to": "people",
+               "field_name":"committer_id",
+               "desc": "ObjectID that links to an entry in the people collection, which is the committer of this commit"
+            },
+            {  
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"message",
+               "desc": "Commit message"
+            },
+            {  
+               "type":"ObjectIdType",
+               "logical_type":"RID",
+               "reference_to": "commit",
+               "field_name":"commit_id",
+               "desc": "ObjectID that links to the commit if it is in the commit collection"
+            },
+            {  
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"commit_sha",
+               "desc": "Revision hash of the commit"
+            },
+            {  
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"commit_repo_url",
+               "desc": "Repository url of the commit"
+            },
+            {
+               "sub_type": "StringType",
+               "type":"ArrayType",
+               "logical_type":"Name",
+               "field_name":"parents",
+               "desc": "Parents of the commit, list of revision hashes."
+            }
+         ],
+         "desc": "This collection holds general pull request commits.",
+         "collection_name":"pull_request_commit"
+      },
+      {  
+         "fields":[  
+            {
+               "type":"ObjectIdType",
+               "logical_type":"OID",
+               "field_name":"_id",
+               "desc": "Identifier of the document"
+            },
+            {
+               "type":"ObjectIdType",
+               "logical_type":"RID",
+               "reference_to": "pull_request",
+               "field_name":"pull_request_id",
+               "desc": "ObjectID that links to the pull request this file belongs to"
+            },
+            {  
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"sha",
+               "desc": "Sha hash of the file"
+            },
+            {  
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"path",
+               "desc": "Filename"
+            },
+            {  
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"status",
+               "desc": "Status"
+            },
+            {  
+               "type":"IntegerType",
+               "logical_type":"Name",
+               "field_name":"additions",
+               "desc": "Added lines"
+            },
+            {  
+               "type":"IntegerType",
+               "logical_type":"Name",
+               "field_name":"deletions",
+               "desc": "Deleted lines"
+            },
+            {  
+               "type":"IntegerType",
+               "logical_type":"Name",
+               "field_name":"changes",
+               "desc": "Changed lines"
+            },
+            {  
+               "type":"StringType",
+               "logical_type":"Name",
+               "field_name":"patch",
+               "desc": "Diff hunk of the change"
+            }
+         ],
+         "desc": "This collection holds general pull request files.",
+         "collection_name":"pull_request_file"
       }
    ]
 }
