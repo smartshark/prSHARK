@@ -18,6 +18,12 @@ pip install -r requirements.txt
 python -m unittest
 ```
 
+## Build smartSHARK plugin bundle for serverSHARK
+```bash
+cd plugin_packaging
+./build_plugin.sh
+```
+
 ## Execution for smartSHARK
 
 prSHARK tries to link commits, so it would be best if the repository is already collected via vcsSHARK. Otherwise only the project has to exist.
