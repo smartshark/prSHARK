@@ -6,7 +6,7 @@ Currently only Github is supported.
 
 ## Create venv and install dependencies
 ```bash
-python -m virtualenv .
+python -m venv .
 source bin/activate
 pip install -r requirements.txt
 ```
