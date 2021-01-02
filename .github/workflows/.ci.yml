@@ -18,4 +18,5 @@ jobs:
         pip install -r requirements.txt
     - name: Run Tests
       run: |
+        source bin/activate
         python -m unittest
