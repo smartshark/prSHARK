@@ -1,5 +1,7 @@
 # prSHARK
 
+![CI](https://github.com/smartshark/prSHARK/workflows/CI/badge.svg)
+
 Collect pull request information for smartSHARK.
 
 Currently only Github is supported.
