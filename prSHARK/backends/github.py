@@ -159,6 +159,7 @@ class Github():
         url = '{}&page={}&per_page=100'.format(base_url, page)
         dat = self._send_request(url)
         ret += dat
+        self._log.debug('first page response length %s, return length %s', len(dat), len(ret))
 
         # early return
         if len(ret) < 100:
@@ -170,7 +171,8 @@ class Github():
             url = '{}&page={}&per_page=100'.format(base_url, page)
             dat = self._send_request(url)
             ret += dat
-        return dat
+            self._log.debug('response length %s, return length %s', len(dat), len(ret))
+        return ret
 
     def run(self):
         """Executes the complete workflow, fetches all data and saves it into the MongoDB."""
@@ -381,6 +383,7 @@ class Github():
                     mongo_prrc.original_commit_sha = prrc['original_commit_id']
 
                     # we link the PullRequestCommits directly if we can
+                    # the pullrequestcommits may have been removed or squashed, if that is the case we only have the commit_shas
                     try:
                         n1_prc = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=mongo_prrc.commit_sha)
                         mongo_prrc.pull_request_commit_id = n1_prc.id
