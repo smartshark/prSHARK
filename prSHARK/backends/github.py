@@ -354,7 +354,8 @@ class Github():
                 except PullRequestCommit.DoesNotExist:
                     pass
 
-                mongo_prr.creator_id = self._get_person(prr['user']['url'])
+                if prr['user']:
+                    mongo_prr.creator_id = self._get_person(prr['user']['url'])
                 mongo_prr.author_association = prr['author_association']
                 mongo_prr.save()
 

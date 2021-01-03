@@ -10,13 +10,13 @@ if not sys.version_info[0] == 3:
 
 setup(
     name='prSHARK',
-    version='1.0.0',
+    version='1.0.1',
     author='Alexander Trautsch',
     author_email='alexander.trautsch@cs.uni-goettingen.de',
     description='Collect data from pull request systems',
     install_requires=['mongoengine', 'pymongo', 'requests>=2.10.0', 'oauthlib>=3.0.0',
                       'cryptography>=1.3.4', 'python-dateutil', 'validate_email',
-                      'pycoshark>=1.4.0', 'mock'],
+                      'pycoshark>=1.4.1', 'mock'],
     url='https://github.com/smartshark/prSHARK',
     download_url='https://github.com/smartshark/prSHARK/zipball/master',
     packages=find_packages(),

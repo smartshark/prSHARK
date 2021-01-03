@@ -1,7 +1,7 @@
 {
     "name": "prSHARK",
     "author": "Alexander Trautsch",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "plugin_type": "other",
     "linux_libraries": [
     ],
