@@ -324,10 +324,11 @@ class Github():
             # pr files, sha is not a link to PullRequestCommit, maybe its the file hash
             for pr_file in self.fetch_file_list(pr['number']):
                 try:
-                    mongo_pr_file = PullRequestFile.objects.get(pull_request_id=mongo_pr.id, sha=pr_file['sha'], path=pr_file['filename'])
+                    mongo_pr_file = PullRequestFile.objects.get(pull_request_id=mongo_pr.id, path=pr_file['filename'])
                 except PullRequestFile.DoesNotExist:
-                    mongo_pr_file = PullRequestFile(pull_request_id=mongo_pr.id, sha=pr_file['sha'], path=pr_file['filename'])
+                    mongo_pr_file = PullRequestFile(pull_request_id=mongo_pr.id, path=pr_file['filename'])
 
+                mongo_pr_file.sha = pr_file['sha']
                 mongo_pr_file.status = pr_file['status']
                 mongo_pr_file.additions = pr_file['additions']
                 mongo_pr_file.deletions = pr_file['deletions']
