@@ -442,7 +442,9 @@ class Github():
                 except PullRequestEvent.DoesNotExist:
                     mongo_pre = PullRequestEvent(pull_request_id=mongo_pr.id, external_id=str(e['id']))
 
-                mongo_pre.author_id = self._get_person(e['actor']['url'])
+                if e['actor']:
+                    mongo_pre.author_id = self._get_person(e['actor']['url'])
+
                 mongo_pre.created_at = dateutil.parser.parse(e['created_at'])
                 mongo_pre.event_type = e['event']
 
