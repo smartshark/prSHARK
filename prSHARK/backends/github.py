@@ -347,7 +347,9 @@ class Github():
                 mongo_prr.state = prr['state']
                 mongo_prr.description = prr['body']
                 mongo_prr.submitted_at = dateutil.parser.parse(prr['submitted_at'])
-                mongo_prr.commit_sha = prr['commit_id']
+
+                if 'commit_id' in prr.keys():
+                    mongo_prr.commit_sha = prr['commit_id']
 
                 try:
                     n0_prc = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=mongo_prr.commit_sha)
@@ -376,7 +378,8 @@ class Github():
                     mongo_prrc.original_position = prrc['original_position']
                     mongo_prrc.comment = prrc['body']
 
-                    mongo_prrc.creator_id = self._get_person(prrc['user']['url'])
+                    if prrc['user']:
+                        mongo_prrc.creator_id = self._get_person(prrc['user']['url'])
                     mongo_prrc.created_at = dateutil.parser.parse(prrc['created_at'])
                     mongo_prrc.updated_at = dateutil.parser.parse(prrc['updated_at'])
                     mongo_prrc.author_association = prrc['author_association']
