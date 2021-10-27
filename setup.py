@@ -10,7 +10,7 @@ if not sys.version_info[0] == 3:
 
 setup(
     name='prSHARK',
-    version='1.0.1',
+    version='1.0.2',
     author='Alexander Trautsch',
     author_email='alexander.trautsch@cs.uni-goettingen.de',
     description='Collect data from pull request systems',

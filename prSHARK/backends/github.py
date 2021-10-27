@@ -128,20 +128,27 @@ class Github():
         if user_url in self._people:
             return self._people[user_url]
 
-        raw_user = self._send_request(user_url)
-        name = raw_user['name']
-
-        if name is None:
-            name = raw_user['login']
-
-        email = raw_user['email']
-        if email is None:
+        # deleted users in github or invalid users in github
+        if user_url == 'https://api.github.com/users/invalid-email-address':
+            name = 'invalid-email-address'
+            login = 'invalid-email-address'
             email = 'null'
+        else:
+            raw_user = self._send_request(user_url)
+            name = raw_user['name']
+            login = raw_user['login']
+
+            if name is None:
+                name = raw_user['login']
+
+            email = raw_user['email']
+            if email is None:
+                email = 'null'
 
         people_id = People.objects(
             name=name,
             email=email
-        ).upsert_one(name=name, email=email, username=raw_user['login']).id
+        ).upsert_one(name=name, email=email, username=login).id
         self._people[user_url] = people_id
         return people_id
 
