@@ -6,10 +6,11 @@ import copy
 import requests
 import dateutil
 
-from pycoshark.mongomodels import VCSSystem, Commit, PullRequest, People, PullRequestReview, PullRequestReviewComment, PullRequestComment, PullRequestEvent, PullRequestCommit, PullRequestFile
+from pycoshark.mongomodels import VCSSystem, Commit, PullRequest, People, PullRequestReview, PullRequestReviewComment, \
+    PullRequestComment, PullRequestEvent, PullRequestCommit, PullRequestFile
 
 
-class Github():
+class Github:
     """Github Pull Request API connector
 
     This is similiar to the issueSHARK github backend only that this fetches pull requests instead of issues.
@@ -47,7 +48,8 @@ class Github():
             resp = requests.get(url, headers=headers, proxies=self.config.get_proxy_dictionary(), auth=auth)
 
             if resp.status_code != 200:
-                self._log.error("Problem with getting data via url %s. Code: %s, Error: %s", url, resp.status_code, resp.text)
+                self._log.error("Problem with getting data via url %s. Code: %s, Error: %s", url, resp.status_code,
+                                resp.text)
 
                 # check if we just miss some field, e.g., pulls/{number}/files?&page=1&per_page=100.
                 # Error: {"message":"Sorry, there was a problem generating this diff. The repository may be missing relevant data.","errors":[{"resource":"PullRequest","field":"diff","code":"not_available"}],"documentation_url":"https://docs.github.com/v3/pulls#diff-error"}
@@ -56,11 +58,13 @@ class Github():
                     if r:
                         if 'errors' in r.keys():
                             for e in r['errors']:
-                                if e['resource'] == 'PullRequest' and e['field'] == 'diff' and e['code'] == 'not_available' and 'per_page' in url:  # we try to be as explicit as possible here
+                                if e['resource'] == 'PullRequest' and e['field'] == 'diff' and e[
+                                    'code'] == 'not_available' and 'per_page' in url:  # we try to be as explicit as possible here
                                     self._log.error('unfetchable files for pull request, returning [], try: %s', tries)
                                     return []
                 if resp.status_code == 500 and tries == 2:  # problem for some part of endpoints, e.g., https://api.github.com/repos/apache/kafka/pulls/3490/reviews/48104142/comments?&page=1&per_page=100
-                    self._log.error("Problem with getting data via url %s. Code: %s, Error: %s", url, resp.status_code, resp.text)
+                    self._log.error("Problem with getting data via url %s. Code: %s, Error: %s", url, resp.status_code,
+                                    resp.text)
                     if 'per_page' in url:
                         self._log.error('unfetchable list, returning [], try: %s', tries)
                         return []
@@ -69,7 +73,6 @@ class Github():
             else:
                 # It can happen that we exceed the github api limit. If we have only 1 request left we will wait
                 if 'X-RateLimit-Remaining' in resp.headers and int(resp.headers['X-RateLimit-Remaining']) <= 1:
-
                     # We get the reset time (UTC Epoch seconds)
                     time_when_reset = datetime.datetime.fromtimestamp(float(resp.headers['X-RateLimit-Reset']))
                     now = datetime.datetime.now()
@@ -220,9 +223,20 @@ class Github():
         url = '{}/{}/events?'.format(base_url, pr_number)
         return self._fetch_all_pages(url)
 
+    def fetch_timeline_list(self, pr_number):
+        """Pull request timeline events are extracted via the issues endpoint in Github.
+
+        :param pr_number: pull request number for which we fetch the issue events
+        """
+        base_url = self.config.tracking_url.replace('/pulls', '/issues')
+        url = '{}/{}/timeline?'.format(base_url, pr_number)
+        return self._fetch_all_pages(url)
+
     def fetch_pr_list(self):
         """Fetch complete list of pull requests for this the url passed on the command line."""
-        url = '{}?state=all'.format(self.config.tracking_url)  # this is where we would put since=last_updated_at if it would be supported by the github api
+        # this is where we would put since=last_updated_at if it would be supported by the github api
+        url = '{}?state=all'.format(
+            self.config.tracking_url)
         return self._fetch_all_pages(url)
 
     def fetch_review_list(self, pr_number):
@@ -263,9 +277,12 @@ class Github():
         We are saving all mongo objects here.
         """
         for pr in prs:
+            already_exist = False
+            new_commit = False
             self._log.info('saving pull request %s', pr['number'])
             try:
                 mongo_pr = PullRequest.objects.get(pull_request_system_id=self._prs.id, external_id=str(pr['number']))
+                already_exist = True
             except PullRequest.DoesNotExist:
                 mongo_pr = PullRequest(pull_request_system_id=self._prs.id, external_id=str(pr['number']))
 
@@ -310,156 +327,64 @@ class Github():
 
             mongo_pr.merge_commit_id = self._get_commit_id(pr['merge_commit_sha'], mongo_pr.target_repo_url)
 
-            for u in pr['assignees']:
-                mongo_pr.linked_user_ids.append(self._get_person(u['url']))
-
-            for u in pr['requested_reviewers']:
-                mongo_pr.requested_reviewer_ids.append(self._get_person(u['url']))
-
             for lbl in pr['labels']:
-                mongo_pr.labels.append(lbl['name'])
+                if lbl['name'] not in mongo_pr.labels:
+                    mongo_pr.labels.append(lbl['name'])
+
             mongo_pr.save()
 
-            # pr commits
-            for pr_commit in self.fetch_commit_list(pr['number']):
-                try:
-                    mongo_pr_commit = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=pr_commit['sha'])
-                except PullRequestCommit.DoesNotExist:
-                    mongo_pr_commit = PullRequestCommit(pull_request_id=mongo_pr.id, commit_sha=pr_commit['sha'])
+            if already_exist:
+                last_update = self._prs.last_updated
+            else:
+                # put the oldest date possible
+                last_update = datetime.datetime(2, 2, 2, 2, 2)
 
-                # author and commiter urls are not always present, sometimes we only have a username and an email but no login
-                if pr_commit['author'] and 'url' in pr_commit['author'].keys():
-                    mongo_pr_commit.author_id = self._get_person(pr_commit['author']['url'])
-                else:
-                    mongo_pr_commit.author_id = self._get_person_without_url(pr_commit['commit']['author']['name'], pr_commit['commit']['author']['email'])
+            for event in self.fetch_timeline_list(pr['number']):
 
-                if pr_commit['committer'] and 'url' in pr_commit['committer'].keys():
-                    mongo_pr_commit.committer_id = self._get_person(pr_commit['committer']['url'])
-                else:
-                    mongo_pr_commit.commiter_id = self._get_person_without_url(pr_commit['commit']['committer']['name'], pr_commit['commit']['committer']['email'])
+                if event['event'] == 'committed' and dateutil.parser.parse(
+                        event['committer']['date']).timestamp() > last_update.timestamp():
 
-                mongo_pr_commit.parents = [p['sha'] for p in pr_commit['parents']]
-                mongo_pr_commit.message = pr_commit['commit']['message']
-                mongo_pr_commit.commit_repo_url = self._get_repo_url(pr_commit['url'])
-                mongo_pr_commit.commit_id = self._get_commit_id(mongo_pr_commit.commit_sha, mongo_pr_commit.commit_repo_url)
-                mongo_pr_commit.save()
+                    new_commit = True
+                    self.parse_commit(mongo_pr, event)
+
+                elif event['event'] == 'reviewed' and dateutil.parser.parse(
+                        event['submitted_at']).timestamp() > last_update.timestamp():
+
+                    self.pares_review(mongo_pr, pr, event)
+                elif event['event'] == 'commented' and dateutil.parser.parse(
+                        event['updated_at']).timestamp() > last_update.timestamp():
+
+                    self.parse_comment(event, mongo_pr)
+
+                elif event['event'] == 'assigned' and dateutil.parser.parse(
+                        event['created_at']).timestamp() > last_update.timestamp():
+
+                    mongo_pr.linked_user_ids.append(self._get_person(event['assignee']['url']))
+
+                elif event['event'] == 'review_requested' and dateutil.parser.parse(
+                        event['created_at']).timestamp() > last_update.timestamp():
+
+                    mongo_pr.requested_reviewer_ids.append(self._get_person(event['requested_reviewer']['url']))
+
+            mongo_pr.save()
 
             # pr files, sha is not a link to PullRequestCommit, maybe its the file hash
-            for pr_file in self.fetch_file_list(pr['number']):
-                try:
-                    mongo_pr_file = PullRequestFile.objects.get(pull_request_id=mongo_pr.id, path=pr_file['filename'])
-                except PullRequestFile.DoesNotExist:
-                    mongo_pr_file = PullRequestFile(pull_request_id=mongo_pr.id, path=pr_file['filename'])
-
-                mongo_pr_file.sha = pr_file['sha']
-                mongo_pr_file.status = pr_file['status']
-                mongo_pr_file.additions = pr_file['additions']
-                mongo_pr_file.deletions = pr_file['deletions']
-                mongo_pr_file.changes = pr_file['changes']
-                if 'patch' in pr_file.keys():
-                    mongo_pr_file.patch = pr_file['patch']
-                mongo_pr_file.save()
-
-            # pull request reviews
-            for prr in self.fetch_review_list(pr['number']):
-                try:
-                    mongo_prr = PullRequestReview.objects.get(pull_request_id=mongo_pr.id, external_id=str(prr['id']))
-                except PullRequestReview.DoesNotExist:
-                    mongo_prr = PullRequestReview(pull_request_id=mongo_pr.id, external_id=str(prr['id']))
-
-                mongo_prr.state = prr['state']
-                mongo_prr.description = prr['body']
-                mongo_prr.submitted_at = dateutil.parser.parse(prr['submitted_at'])
-
-                if 'commit_id' in prr.keys():
-                    mongo_prr.commit_sha = prr['commit_id']
-
-                try:
-                    n0_prc = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=mongo_prr.commit_sha)
-                    mongo_prr.pull_request_commit_id = n0_prc.id
-                except PullRequestCommit.DoesNotExist:
-                    pass
-
-                if prr['user']:
-                    mongo_prr.creator_id = self._get_person(prr['user']['url'])
-                mongo_prr.author_association = prr['author_association']
-                mongo_prr.save()
-
-                # pull request review comment
-                for prrc in self.fetch_review_comment_list(pr['number'], prr['id']):
+            if new_commit or not already_exist:
+                for pr_file in self.fetch_file_list(pr['number']):
                     try:
-                        mongo_prrc = PullRequestReviewComment.objects.get(pull_request_review_id=mongo_prr.id, external_id=str(prrc['id']))
-                    except PullRequestReviewComment.DoesNotExist:
-                        mongo_prrc = PullRequestReviewComment(pull_request_review_id=mongo_prr.id, external_id=str(prrc['id']))
+                        mongo_pr_file = PullRequestFile.objects.get(pull_request_id=mongo_pr.id,
+                                                                    path=pr_file['filename'])
+                    except PullRequestFile.DoesNotExist:
+                        mongo_pr_file = PullRequestFile(pull_request_id=mongo_pr.id, path=pr_file['filename'])
 
-                    mongo_prrc.diff_hunk = prrc['diff_hunk']
-
-                    # we do not link to PullRequestFile here because
-                    # PullRequestFile is sometimes missing, maybe the file is no longer part of current file list after a commit to the pull request
-                    mongo_prrc.path = prrc['path']
-                    mongo_prrc.position = prrc['position']
-                    mongo_prrc.original_position = prrc['original_position']
-                    mongo_prrc.comment = prrc['body']
-
-                    if prrc['user']:
-                        mongo_prrc.creator_id = self._get_person(prrc['user']['url'])
-                    mongo_prrc.created_at = dateutil.parser.parse(prrc['created_at'])
-                    mongo_prrc.updated_at = dateutil.parser.parse(prrc['updated_at'])
-                    mongo_prrc.author_association = prrc['author_association']
-
-                    mongo_prrc.commit_sha = prrc['commit_id']
-                    mongo_prrc.original_commit_sha = prrc['original_commit_id']
-
-                    # we link the PullRequestCommits directly if we can
-                    # the pullrequestcommits may have been removed or squashed, if that is the case we only have the commit_shas
-                    try:
-                        n1_prc = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=mongo_prrc.commit_sha)
-                        mongo_prrc.pull_request_commit_id = n1_prc.id
-                    except PullRequestCommit.DoesNotExist:
-                        pass
-
-                    try:
-                        n2_prc = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=mongo_prrc.original_commit_sha)
-                        mongo_prrc.original_pull_request_commit_id = n2_prc.id
-                    except PullRequestCommit.DoesNotExist:
-                        pass
-
-                    # some recent additions to the api, may not be available yet
-                    if 'start_line' in prrc.keys():
-                        mongo_prrc.start_line = prrc['start_line']
-                    if 'original_start_line' in prrc.keys():
-                        mongo_prrc.original_start_line = prrc['original_start_line']
-                    if 'start_side' in prrc.keys():
-                        mongo_prrc.start_side = prrc['start_side']
-                    if 'line' in prrc.keys():
-                        mongo_prrc.line = prrc['line']
-                    if 'original_line' in prrc.keys():
-                        mongo_prrc.original_line = prrc['original_line']
-                    if 'side' in prrc.keys():
-                        mongo_prrc.side = prrc['side']
-
-                    if 'in_reply_to_id' in prrc.keys() and prrc['in_reply_to_id']:
-                        try:
-                            ref_prrc = PullRequestReviewComment.objects.get(pull_request_review_id=mongo_prr.id, external_id=str(prrc['in_reply_to_id']))
-                        except PullRequestReviewComment.DoesNotExist:
-                            ref_prrc = PullRequestReviewComment(pull_request_review_id=mongo_prr.id, external_id=str(prrc['in_reply_to_id']))
-                            ref_prrc.save()  # create empty for ref, will get populated later
-                        mongo_prrc.in_reply_to_id = ref_prrc.id
-                    mongo_prrc.save()
-
-            # comments outside of reviews
-            for c in self.fetch_comment_list(pr['number']):
-                try:
-                    mongo_prc = PullRequestComment.objects.get(pull_request_id=mongo_pr.id, external_id=str(c['id']))
-                except PullRequestComment.DoesNotExist:
-                    mongo_prc = PullRequestComment(pull_request_id=mongo_pr.id, external_id=str(c['id']))
-
-                mongo_prc.created_at = dateutil.parser.parse(c['created_at'])
-                mongo_prc.updated_at = dateutil.parser.parse(c['updated_at'])
-                mongo_prc.author_id = self._get_person(c['user']['url'])
-                mongo_prc.comment = c['body']
-                mongo_prc.author_association = c['author_association']
-                mongo_prc.save()
+                    mongo_pr_file.sha = pr_file['sha']
+                    mongo_pr_file.status = pr_file['status']
+                    mongo_pr_file.additions = pr_file['additions']
+                    mongo_pr_file.deletions = pr_file['deletions']
+                    mongo_pr_file.changes = pr_file['changes']
+                    if 'patch' in pr_file.keys():
+                        mongo_pr_file.patch = pr_file['patch']
+                    mongo_pr_file.save()
 
             # events
             for e in self.fetch_event_list(pr['number']):
@@ -491,3 +416,156 @@ class Github():
                 del ad['created_at']
                 mongo_pre.additional_data = ad
                 mongo_pre.save()
+
+    def parse_comment(self, c, mongo_pr):
+        """
+        Parses and stores a comment from a pull request in the database.
+
+
+        :param c: A dictionary containing comment information from the pull request.
+        :param mongo_pr:The associated pull request in the MongoDB.
+        :return: None
+        """
+        try:
+            mongo_prc = PullRequestComment.objects.get(pull_request_id=mongo_pr.id, external_id=str(c['id']))
+        except PullRequestComment.DoesNotExist:
+            mongo_prc = PullRequestComment(pull_request_id=mongo_pr.id, external_id=str(c['id']))
+        mongo_prc.created_at = dateutil.parser.parse(c['created_at'])
+        mongo_prc.updated_at = dateutil.parser.parse(c['updated_at'])
+        mongo_prc.author_id = self._get_person(c['user']['url'])
+        mongo_prc.comment = c['body']
+        mongo_prc.author_association = c['author_association']
+        mongo_prc.save()
+
+    def pares_review(self, mongo_pr, pr, prr):
+        """
+        Parses and stores a pull request review in the database, along with its associated review comments.
+
+
+        :param mongo_pr: The associated pull request in the MongoDB.
+        :param pr: A dictionary containing pull request information.
+        :param prr: A dictionary containing pull request review information.
+        :return: None.
+        """
+        try:
+            mongo_prr = PullRequestReview.objects.get(pull_request_id=mongo_pr.id, external_id=str(prr['id']))
+        except PullRequestReview.DoesNotExist:
+            mongo_prr = PullRequestReview(pull_request_id=mongo_pr.id, external_id=str(prr['id']))
+        mongo_prr.state = prr['state']
+        mongo_prr.description = prr['body']
+        mongo_prr.submitted_at = dateutil.parser.parse(prr['submitted_at'])
+        if 'commit_id' in prr.keys():
+            mongo_prr.commit_sha = prr['commit_id']
+        try:
+            n0_prc = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=mongo_prr.commit_sha)
+            mongo_prr.pull_request_commit_id = n0_prc.id
+        except PullRequestCommit.DoesNotExist:
+            pass
+        if prr['user']:
+            mongo_prr.creator_id = self._get_person(prr['user']['url'])
+        mongo_prr.author_association = prr['author_association']
+        mongo_prr.save()
+        # pul   l request review comment
+        for prrc in self.fetch_review_comment_list(pr['number'], prr['id']):
+            self.parse_review_comment(mongo_pr, mongo_prr, prrc)
+
+    def parse_review_comment(self, mongo_pr, mongo_prr, prrc):
+        """
+        Parses and stores a review comment from a pull request review in the database.
+
+
+        :param mongo_pr: The associated pull request in the MongoDB.
+        :param mongo_prr: The associated pull request review in the MongoDB.
+        :param prrc: A dictionary containing review comment information.
+        :return: None.
+
+        """
+        try:
+            mongo_prrc = PullRequestReviewComment.objects.get(pull_request_review_id=mongo_prr.id,
+                                                              external_id=str(prrc['id']))
+        except PullRequestReviewComment.DoesNotExist:
+            mongo_prrc = PullRequestReviewComment(pull_request_review_id=mongo_prr.id, external_id=str(prrc['id']))
+        mongo_prrc.diff_hunk = prrc['diff_hunk']
+        # we do not link to PullRequestFile here because
+        # PullRequestFile is sometimes missing, maybe the file is no longer part of current file list after a commit to the pull request
+        mongo_prrc.path = prrc['path']
+        mongo_prrc.position = prrc['position']
+        mongo_prrc.original_position = prrc['original_position']
+        mongo_prrc.comment = prrc['body']
+        if prrc['user']:
+            mongo_prrc.creator_id = self._get_person(prrc['user']['url'])
+        mongo_prrc.created_at = dateutil.parser.parse(prrc['created_at'])
+        mongo_prrc.updated_at = dateutil.parser.parse(prrc['updated_at'])
+        mongo_prrc.author_association = prrc['author_association']
+        mongo_prrc.commit_sha = prrc['commit_id']
+        mongo_prrc.original_commit_sha = prrc['original_commit_id']
+        # we link the PullRequestCommits directly if we can
+        # the pullrequestcommits may have been removed or squashed, if that is the case we only have the commit_shas
+        try:
+            n1_prc = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=mongo_prrc.commit_sha)
+            mongo_prrc.pull_request_commit_id = n1_prc.id
+        except PullRequestCommit.DoesNotExist:
+            pass
+        try:
+            n2_prc = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id,
+                                                   commit_sha=mongo_prrc.original_commit_sha)
+            mongo_prrc.original_pull_request_commit_id = n2_prc.id
+        except PullRequestCommit.DoesNotExist:
+            pass
+        # some recent additions to the api, may not be available yet
+        if 'start_line' in prrc.keys():
+            mongo_prrc.start_line = prrc['start_line']
+        if 'original_start_line' in prrc.keys():
+            mongo_prrc.original_start_line = prrc['original_start_line']
+        if 'start_side' in prrc.keys():
+            mongo_prrc.start_side = prrc['start_side']
+        if 'line' in prrc.keys():
+            mongo_prrc.line = prrc['line']
+        if 'original_line' in prrc.keys():
+            mongo_prrc.original_line = prrc['original_line']
+        if 'side' in prrc.keys():
+            mongo_prrc.side = prrc['side']
+        if 'in_reply_to_id' in prrc.keys() and prrc['in_reply_to_id']:
+            try:
+                ref_prrc = PullRequestReviewComment.objects.get(pull_request_review_id=mongo_prr.id,
+                                                                external_id=str(prrc['in_reply_to_id']))
+            except PullRequestReviewComment.DoesNotExist:
+                ref_prrc = PullRequestReviewComment(pull_request_review_id=mongo_prr.id,
+                                                    external_id=str(prrc['in_reply_to_id']))
+                ref_prrc.save()  # create empty for ref, will get populated later
+            mongo_prrc.in_reply_to_id = ref_prrc.id
+        mongo_prrc.save()
+
+    def parse_commit(self, mongo_pr, pr_commit):
+        """
+        Parses and stores a commit related to a pull request in the database.
+
+
+        :param mongo_pr: The associated pull request in the MongoDB.
+        :param pr_commit: A dictionary containing commit information.
+        :return: None.
+        """
+        try:
+            mongo_pr_commit = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=pr_commit['sha'])
+        except PullRequestCommit.DoesNotExist:
+            mongo_pr_commit = PullRequestCommit(pull_request_id=mongo_pr.id, commit_sha=pr_commit['sha'])
+        # author and commiter urls are not always present, sometimes we only have a username and an email but no login
+
+        if pr_commit['author'] and 'url' in pr_commit['author'].keys():
+            mongo_pr_commit.author_id = self._get_person(pr_commit['author']['url'])
+        else:
+            mongo_pr_commit.author_id = self._get_person_without_url(pr_commit['author']['name'],
+                                                                     pr_commit['author']['email'])
+
+        if pr_commit['committer'] and 'url' in pr_commit['committer'].keys():
+            mongo_pr_commit.committer_id = self._get_person(pr_commit['committer']['url'])
+        else:
+
+            mongo_pr_commit.commiter_id = self._get_person_without_url(pr_commit['committer']['name'],
+                                                                       pr_commit['committer']['email'])
+
+        mongo_pr_commit.parents = [p['sha'] for p in pr_commit['parents']]
+        mongo_pr_commit.message = pr_commit['message']
+        mongo_pr_commit.commit_repo_url = self._get_repo_url(pr_commit['url'])
+        mongo_pr_commit.commit_id = self._get_commit_id(mongo_pr_commit.commit_sha, mongo_pr_commit.commit_repo_url)
+        mongo_pr_commit.save()

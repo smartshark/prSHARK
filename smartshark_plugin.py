@@ -51,7 +51,6 @@ def main(args):
         pr_system = PullRequestSystem.objects.get(url=cfg.tracking_url, project_id=project.id)
     except PullRequestSystem.DoesNotExist:
         pr_system = PullRequestSystem(project_id=project.id, url=cfg.tracking_url)
-    pr_system.last_updated = datetime.datetime.now()
     pr_system.save()
 
     # now we do the actual work, we are lazy for now and to not use a more dynamic import of backends
@@ -62,6 +61,9 @@ def main(args):
     else:
         log.error('Backend %s not implemented', args.backend)
         sys.exit(1)
+
+    pr_system.last_updated = datetime.datetime.now()
+    pr_system.save()
 
     end = timeit.default_timer() - start
     log.info('Finished data extraction in {:.5f}s'.format(end))
