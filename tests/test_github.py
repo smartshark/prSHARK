@@ -6,6 +6,8 @@ import unittest
 import json
 from unittest.mock import patch
 from argparse import Namespace
+import mongomock
+
 
 import mongoengine
 
@@ -37,6 +39,9 @@ with open('tests/fixtures/issue_comments.json', 'r') as f:
 with open('tests/fixtures/issue_events.json', 'r') as f:
     issue_event_list = json.loads(f.read())
 
+with open('tests/fixtures/issue_timeline.json', 'r') as f:
+    issue_timeline_list = json.loads(f.read())
+
 with open('tests/fixtures/pr_commits.json', 'r') as f:
     pr_commit_list = json.loads(f.read())
 
@@ -63,6 +68,8 @@ def mock_return(*args, **kwargs):
         return issue_comment_list
     if '/issues/' in url and url.endswith('/events'):
         return issue_event_list
+    if '/issues/' in url and url.endswith('/timeline'):
+        return issue_timeline_list
     if '/pulls/' in url and url.endswith('/commits'):
         return pr_commit_list
     if '/pulls/' in url and url.endswith('/files'):
@@ -75,7 +82,7 @@ class TestGithubBackend(unittest.TestCase):
     def setUp(self):
         """Setup the mongomock connection."""
         mongoengine.connection.disconnect()
-        mongoengine.connect('testdb', host='mongomock://localhost')
+        mongoengine.connect('testdb', host='mongodb://localhost', mongo_client_class=mongomock.MongoClient)
         p = Project(name='test')
         p.save()
 
@@ -110,14 +117,12 @@ class TestGithubBackend(unittest.TestCase):
         pr1 = data[0]
         gp = Github(cfg, project, pr_system)
         gp.parse_pr_list(data)
-
         pr = PullRequest.objects.get(external_id='1347')
         p = People.objects.get(id=pr.assignee_id)
         h = People.objects.get(name='mr hubot')
         o = People.objects.get(name='other user')
         prr = PullRequestReview.objects.get(pull_request_id=pr.id)
         prrc = PullRequestReviewComment.objects.get(pull_request_review_id=prr.id, external_id='10')
-
         prc = PullRequestComment.objects.get(pull_request_id=pr.id)
         pre = PullRequestEvent.objects.get(pull_request_id=pr.id)
 

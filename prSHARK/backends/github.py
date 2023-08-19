@@ -561,7 +561,7 @@ class Github:
             mongo_pr_commit.committer_id = self._get_person(pr_commit['committer']['url'])
         else:
 
-            mongo_pr_commit.commiter_id = self._get_person_without_url(pr_commit['committer']['name'],
+            mongo_pr_commit.committer_id = self._get_person_without_url(pr_commit['committer']['name'],
                                                                        pr_commit['committer']['email'])
 
         mongo_pr_commit.parents = [p['sha'] for p in pr_commit['parents']]
