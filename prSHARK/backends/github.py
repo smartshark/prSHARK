@@ -5,9 +5,10 @@ import time
 import copy
 import requests
 import dateutil
+from deepdiff import DeepDiff
 
 from pycoshark.mongomodels import VCSSystem, Commit, PullRequest, People, PullRequestReview, PullRequestReviewComment, \
-    PullRequestComment, PullRequestEvent, PullRequestCommit, PullRequestFile
+    PullRequestComment, PullRequestEvent, PullRequestFile, PullRequestSystem
 
 
 class Github:
@@ -17,12 +18,18 @@ class Github:
     However, since every pull request is an issue in github we also fetch events and comments from the issue endpoint.
     """
 
-    def __init__(self, config, project, pull_request_system):
+    def __init__(self, config, project):
         self.config = config
         self._log = logging.getLogger('prSHARK.github')
 
-        self._prs = pull_request_system
         self._p = project
+        self.last_system_id = None
+        self.pr_system = None
+        self.parsed_prs = {'prs': {}, 'reviews': {}, 'review_comments': {}, 'comments': {}, 'files': {}, 'events': {}}
+        self.old_prs = {'prs': {}, 'reviews': {}, 'review_comments': {}, 'comments': {}, 'files': {}, 'events': {}}
+        self.pr_diff = {}
+        self.pr_id = None
+        self.review_id = None
 
         self._people = {}  # people cache
 
@@ -202,7 +209,44 @@ class Github:
 
     def run(self):
         """Executes the complete workflow, fetches all data and saves it into the MongoDB."""
+        last_system = PullRequestSystem.objects.filter(project_id=self._p.id).order_by('-collection_date').first()
+        self.last_system_id = last_system.id if last_system else None
+
+        self.pr_system = PullRequestSystem(project_id=self._p.id, url=self.config.tracking_url, collection_date=datetime.datetime.now())
+        self.pr_system.save()
+
         self.parse_pr_list(self.fetch_pr_list())
+
+        self.save_prs()
+
+    def save_prs(self):
+        """
+         Save pull requests and related data to the database.
+
+        """
+        self._log.info('Saving pull requests')
+        for pr_id, pr in self.parsed_prs['prs'].items():
+            if pr_id in self.pr_diff and self.pr_diff[pr_id]:
+                pr.save()
+                if pr_id not in self.parsed_prs['reviews']:
+                    continue
+                for review_id, review in self.parsed_prs['reviews'][pr_id].items():
+                    review.pull_request_id = pr.id
+                    review.save()
+                    if (pr_id, review_id) not in self.parsed_prs['review_comments']:
+                        continue
+                    for rc_id, rc in self.parsed_prs['review_comments'][(pr_id, review_id)].items():
+                        rc.pull_request_review_id = review.id
+                        rc.save()
+                for collection in ['comments', 'files', 'events']:
+                    if pr_id not in self.parsed_prs[collection]:
+                        continue
+                    for item_id, item in self.parsed_prs[collection][pr_id].items():
+                        item.pull_request_id = pr.id
+                        item.save()
+            else:
+                self.old_prs['prs'][pr_id]['pull_request_system_ids'].append(self.pr_system.id)
+                self.old_prs['prs'][pr_id].save()
 
     def fetch_comment_list(self, pr_number):
         """Pull request comments are extracted via the issues endpoint in Github.
@@ -277,35 +321,34 @@ class Github:
         We are saving all mongo objects here.
         """
         for pr in prs:
-            already_exist = False
-            new_commit = False
-            self._log.info('saving pull request %s', pr['number'])
+            self._log.info('Parsing pull request %s', pr['number'])
+            self.pr_id = str(pr['number'])
             try:
-                mongo_pr = PullRequest.objects.get(pull_request_system_id=self._prs.id, external_id=str(pr['number']))
-                already_exist = True
+                mongo_pr = PullRequest.objects.get(pull_request_system_ids=self.last_system_id, external_id=str(pr['number']))
+                self.old_prs['prs'][self.pr_id] = mongo_pr
             except PullRequest.DoesNotExist:
-                mongo_pr = PullRequest(pull_request_system_id=self._prs.id, external_id=str(pr['number']))
-
-            mongo_pr.title = pr['title']
-            mongo_pr.description = pr['body']
-            mongo_pr.state = pr['state']
-            mongo_pr.is_locked = pr['locked']
-            mongo_pr.lock_reason = pr['active_lock_reason']
-            mongo_pr.is_draft = pr['draft']
-            mongo_pr.created_at = dateutil.parser.parse(pr['created_at'])
-            mongo_pr.updated_at = dateutil.parser.parse(pr['updated_at'])
+                mongo_pr = None
+            new_pr = PullRequest(pull_request_system_ids=[self.pr_system.id], external_id=str(pr['number']))
+            new_pr.title = pr['title']
+            new_pr.description = pr['body']
+            new_pr.state = pr['state']
+            new_pr.is_locked = pr['locked']
+            new_pr.lock_reason = pr['active_lock_reason']
+            new_pr.is_draft = pr['draft']
+            new_pr.created_at = dateutil.parser.parse(pr['created_at'])
+            new_pr.updated_at = dateutil.parser.parse(pr['updated_at'])
 
             if pr['closed_at']:
-                mongo_pr.closed_at = dateutil.parser.parse(pr['closed_at'])
+                new_pr.closed_at = dateutil.parser.parse(pr['closed_at'])
 
             if pr['merged_at']:
-                mongo_pr.merged_at = dateutil.parser.parse(pr['merged_at'])
+                new_pr.merged_at = dateutil.parser.parse(pr['merged_at'])
 
             if pr['assignee']:
-                mongo_pr.assignee_id = self._get_person(pr['assignee']['url'])
+                new_pr.assignee_id = self._get_person(pr['assignee']['url'])
 
-            mongo_pr.creator_id = self._get_person(pr['user']['url'])
-            mongo_pr.author_association = pr['author_association']
+            new_pr.creator_id = self._get_person(pr['user']['url'])
+            new_pr.author_association = pr['author_association']
 
             # head = fork, source of pull
             # base = target of pull, this should be in our data already
@@ -313,109 +356,126 @@ class Github:
             # repo is sometimes null, if it is we can only link to the repository page of the user but that would not be a repo_url
             # also, sometimes even that is not available
             if pr['head']['repo'] and 'full_name' in pr['head']['repo'].keys():
-                mongo_pr.source_repo_url = 'https://github.com/' + pr['head']['repo']['full_name']
+                new_pr.source_repo_url = 'https://github.com/' + pr['head']['repo']['full_name']
 
-            mongo_pr.source_branch = pr['head']['ref']
-            mongo_pr.source_commit_sha = pr['head']['sha']
-            if mongo_pr.source_repo_url:
-                mongo_pr.source_commit_id = self._get_commit_id(pr['head']['sha'], mongo_pr.source_repo_url)
+            new_pr.source_branch = pr['head']['ref']
+            new_pr.source_commit_sha = pr['head']['sha']
+            if new_pr.source_repo_url:
+                new_pr.source_commit_id = self._get_commit_id(pr['head']['sha'], new_pr.source_repo_url)
 
-            mongo_pr.target_repo_url = 'https://github.com/' + pr['base']['repo']['full_name']
-            mongo_pr.target_branch = pr['base']['ref']
-            mongo_pr.target_commit_sha = pr['base']['sha']
-            mongo_pr.target_commit_id = self._get_commit_id(pr['base']['sha'], mongo_pr.target_repo_url)
+            new_pr.target_repo_url = 'https://github.com/' + pr['base']['repo']['full_name']
+            new_pr.target_branch = pr['base']['ref']
+            new_pr.target_commit_sha = pr['base']['sha']
+            new_pr.target_commit_id = self._get_commit_id(pr['base']['sha'], new_pr.target_repo_url)
 
-            mongo_pr.merge_commit_id = self._get_commit_id(pr['merge_commit_sha'], mongo_pr.target_repo_url)
+            new_pr.merge_commit_id = self._get_commit_id(pr['merge_commit_sha'], new_pr.target_repo_url)
 
             for lbl in pr['labels']:
-                if lbl['name'] not in mongo_pr.labels:
-                    mongo_pr.labels.append(lbl['name'])
-
-            mongo_pr.save()
-
-            if already_exist:
-                last_update = self._prs.last_updated
-            else:
-                # put the oldest date possible
-                last_update = datetime.datetime(2, 2, 2, 2, 2)
+                if lbl['name'] not in new_pr.labels:
+                    new_pr.labels.append(lbl['name'])
 
             for event in self.fetch_timeline_list(pr['number']):
 
-                if event['event'] == 'committed' and dateutil.parser.parse(
-                        event['committer']['date']).timestamp() > last_update.timestamp():
+                if event['event'] == 'committed':
+                    new_pr.commits.append(event['sha'])
 
-                    new_commit = True
-                    self.parse_commit(mongo_pr, event)
-
-                elif event['event'] == 'reviewed' and dateutil.parser.parse(
-                        event['submitted_at']).timestamp() > last_update.timestamp():
+                elif event['event'] == 'reviewed':
 
                     self.pares_review(mongo_pr, pr, event)
-                elif event['event'] == 'commented' and dateutil.parser.parse(
-                        event['updated_at']).timestamp() > last_update.timestamp():
 
+                elif event['event'] == 'commented':
                     self.parse_comment(event, mongo_pr)
 
-                elif event['event'] == 'assigned' and dateutil.parser.parse(
-                        event['created_at']).timestamp() > last_update.timestamp():
+                elif event['event'] == 'assigned':
 
-                    mongo_pr.linked_user_ids.append(self._get_person(event['assignee']['url']))
+                    new_pr.linked_user_ids.append(self._get_person(event['assignee']['url']))
 
-                elif event['event'] == 'review_requested' and dateutil.parser.parse(
-                        event['created_at']).timestamp() > last_update.timestamp():
+                elif event['event'] == 'review_requested':
+                    if 'requested_reviewer' in event:
+                        new_pr.requested_reviewer_ids.append(self._get_person(event['requested_reviewer']['url']))
 
-                    mongo_pr.requested_reviewer_ids.append(self._get_person(event['requested_reviewer']['url']))
-
-            mongo_pr.save()
+            self.parsed_prs['prs'][self.pr_id] = new_pr
+            self.check_diff(mongo_pr, new_pr, 'pull_request_system_ids')
 
             # pr files, sha is not a link to PullRequestCommit, maybe its the file hash
-            if new_commit or not already_exist:
-                for pr_file in self.fetch_file_list(pr['number']):
-                    try:
-                        mongo_pr_file = PullRequestFile.objects.get(pull_request_id=mongo_pr.id,
-                                                                    path=pr_file['filename'])
-                    except PullRequestFile.DoesNotExist:
-                        mongo_pr_file = PullRequestFile(pull_request_id=mongo_pr.id, path=pr_file['filename'])
-
-                    mongo_pr_file.sha = pr_file['sha']
-                    mongo_pr_file.status = pr_file['status']
-                    mongo_pr_file.additions = pr_file['additions']
-                    mongo_pr_file.deletions = pr_file['deletions']
-                    mongo_pr_file.changes = pr_file['changes']
-                    if 'patch' in pr_file.keys():
-                        mongo_pr_file.patch = pr_file['patch']
-                    mongo_pr_file.save()
+            self.parse_files(mongo_pr, pr)
 
             # events
-            for e in self.fetch_event_list(pr['number']):
+            self.parse_events(mongo_pr, pr)
+
+    def parse_events(self, mongo_pr, pr):
+        """
+           Parse and process events related to a pull request.
+
+           :param mongo_pr: The MongoDB representation of the pull request.
+           :param pr: The pull request data from an external source (e.g., GitHub API).
+           :return: None
+        """
+        for e in self.fetch_event_list(pr['number']):
+            mongo_pre = None
+            if mongo_pr:
                 try:
                     mongo_pre = PullRequestEvent.objects.get(pull_request_id=mongo_pr.id, external_id=str(e['id']))
                 except PullRequestEvent.DoesNotExist:
-                    mongo_pre = PullRequestEvent(pull_request_id=mongo_pr.id, external_id=str(e['id']))
+                    mongo_pre = None
 
-                if e['actor']:
-                    mongo_pre.author_id = self._get_person(e['actor']['url'])
+            new_pre = PullRequestEvent(external_id=str(e['id']))
+            if e['actor']:
+                new_pre.author_id = self._get_person(e['actor']['url'])
 
-                mongo_pre.created_at = dateutil.parser.parse(e['created_at'])
-                mongo_pre.event_type = e['event']
+            new_pre.created_at = dateutil.parser.parse(e['created_at'])
+            new_pre.event_type = e['event']
 
-                if e['commit_id']:
-                    mongo_pre.commit_id = self._get_commit_id(e['commit_id'], self._get_repo_url(e['commit_url']))
-                    mongo_pre.commit_sha = e['commit_id']
-                    mongo_pre.commit_repo_url = self._get_repo_url(e['commit_url'])
+            if e['commit_id']:
+                new_pre.commit_id = self._get_commit_id(e['commit_id'], self._get_repo_url(e['commit_url']))
+                new_pre.commit_sha = e['commit_id']
+                new_pre.commit_repo_url = self._get_repo_url(e['commit_url'])
 
-                # remove all common attributes then store excess as additional_data
-                ad = copy.deepcopy(e)
-                del ad['commit_id']
-                del ad['event']
-                del ad['commit_url']
-                del ad['actor']
-                del ad['id']
-                del ad['node_id']
-                del ad['url']
-                del ad['created_at']
-                mongo_pre.additional_data = ad
-                mongo_pre.save()
+            # remove all common attributes then store excess as additional_data
+            ad = copy.deepcopy(e)
+            del ad['commit_id']
+            del ad['event']
+            del ad['commit_url']
+            del ad['actor']
+            del ad['id']
+            del ad['node_id']
+            del ad['url']
+            del ad['created_at']
+            new_pre.additional_data = ad
+
+            if self.pr_id not in self.parsed_prs['events']:
+                self.parsed_prs['events'][self.pr_id] = {}
+            self.parsed_prs['events'][self.pr_id][str(e['id'])] = new_pre
+            self.check_diff(mongo_pre, new_pre, 'pull_request_id')
+
+    def parse_files(self, mongo_pr, pr):
+        """
+        Parse and process files associated with a pull request.
+
+        :param mongo_pr: The MongoDB representation of the pull request.
+        :param pr: The pull request data from an external source (e.g., GitHub API).
+        """
+        for pr_file in self.fetch_file_list(pr['number']):
+            mongo_pr_file = None
+            if mongo_pr:
+                try:
+                    mongo_pr_file = PullRequestFile.objects.get(pull_request_id=mongo_pr.id, path=pr_file['filename'])
+
+                except PullRequestFile.DoesNotExist:
+                    mongo_pr_file = None
+            new_pr_file = PullRequestFile(path=pr_file['filename'])
+            new_pr_file.sha = pr_file['sha']
+            new_pr_file.status = pr_file['status']
+            new_pr_file.additions = pr_file['additions']
+            new_pr_file.deletions = pr_file['deletions']
+            new_pr_file.changes = pr_file['changes']
+            if 'patch' in pr_file.keys():
+                new_pr_file.patch = pr_file['patch']
+
+            if self.pr_id not in self.parsed_prs['files']:
+                self.parsed_prs['files'][self.pr_id] = {}
+            self.parsed_prs['files'][self.pr_id][pr_file['filename']] = new_pr_file
+            self.check_diff(mongo_pr_file, new_pr_file, 'pull_request_id')
 
     def parse_comment(self, c, mongo_pr):
         """
@@ -426,16 +486,24 @@ class Github:
         :param mongo_pr:The associated pull request in the MongoDB.
         :return: None
         """
-        try:
-            mongo_prc = PullRequestComment.objects.get(pull_request_id=mongo_pr.id, external_id=str(c['id']))
-        except PullRequestComment.DoesNotExist:
-            mongo_prc = PullRequestComment(pull_request_id=mongo_pr.id, external_id=str(c['id']))
-        mongo_prc.created_at = dateutil.parser.parse(c['created_at'])
-        mongo_prc.updated_at = dateutil.parser.parse(c['updated_at'])
-        mongo_prc.author_id = self._get_person(c['user']['url'])
-        mongo_prc.comment = c['body']
-        mongo_prc.author_association = c['author_association']
-        mongo_prc.save()
+        mongo_prc = None
+        if mongo_pr:
+            try:
+                mongo_prc = PullRequestComment.objects.get(pull_request_id=mongo_pr.id, external_id=str(c['id']))
+            except PullRequestComment.DoesNotExist:
+                mongo_prc = None
+
+        new_prc = PullRequestComment(external_id=str(c['id']))
+        new_prc.created_at = dateutil.parser.parse(c['created_at'])
+        new_prc.updated_at = dateutil.parser.parse(c['updated_at'])
+        new_prc.author_id = self._get_person(c['user']['url'])
+        new_prc.comment = c['body']
+        new_prc.author_association = c['author_association']
+
+        if self.pr_id not in self.parsed_prs['comments']:
+            self.parsed_prs['comments'][self.pr_id] = {}
+        self.parsed_prs['comments'][self.pr_id][str(c['id'])] = new_prc
+        self.check_diff(mongo_prc, new_prc, 'pull_request_id')
 
     def pares_review(self, mongo_pr, pr, prr):
         """
@@ -447,24 +515,31 @@ class Github:
         :param prr: A dictionary containing pull request review information.
         :return: None.
         """
-        try:
-            mongo_prr = PullRequestReview.objects.get(pull_request_id=mongo_pr.id, external_id=str(prr['id']))
-        except PullRequestReview.DoesNotExist:
-            mongo_prr = PullRequestReview(pull_request_id=mongo_pr.id, external_id=str(prr['id']))
-        mongo_prr.state = prr['state']
-        mongo_prr.description = prr['body']
-        mongo_prr.submitted_at = dateutil.parser.parse(prr['submitted_at'])
+        self.review_id = str(prr['id'])
+        mongo_prr = None
+        if mongo_pr:
+            try:
+                mongo_prr = PullRequestReview.objects.get(pull_request_id=mongo_pr.id, external_id=str(prr['id']))
+            except PullRequestReview.DoesNotExist:
+                mongo_prr = None
+
+        new_prr = PullRequestReview(external_id=str(prr['id']))
+
+        new_prr.state = prr['state']
+        new_prr.description = prr['body']
+        new_prr.submitted_at = dateutil.parser.parse(prr['submitted_at'])
         if 'commit_id' in prr.keys():
-            mongo_prr.commit_sha = prr['commit_id']
-        try:
-            n0_prc = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=mongo_prr.commit_sha)
-            mongo_prr.pull_request_commit_id = n0_prc.id
-        except PullRequestCommit.DoesNotExist:
-            pass
+            new_prr.commit_sha = prr['commit_id']
         if prr['user']:
-            mongo_prr.creator_id = self._get_person(prr['user']['url'])
-        mongo_prr.author_association = prr['author_association']
-        mongo_prr.save()
+            new_prr.creator_id = self._get_person(prr['user']['url'])
+        new_prr.author_association = prr['author_association']
+
+        if self.pr_id not in self.parsed_prs['reviews']:
+            self.parsed_prs['reviews'][self.pr_id] = {}
+        self.parsed_prs['reviews'][self.pr_id][self.review_id] = new_prr
+        self.check_diff(mongo_prr, new_prr, 'pull_request_id')
+
+
         # pul   l request review comment
         for prrc in self.fetch_review_comment_list(pr['number'], prr['id']):
             self.parse_review_comment(mongo_pr, mongo_prr, prrc)
@@ -480,92 +555,69 @@ class Github:
         :return: None.
 
         """
-        try:
-            mongo_prrc = PullRequestReviewComment.objects.get(pull_request_review_id=mongo_prr.id,
-                                                              external_id=str(prrc['id']))
-        except PullRequestReviewComment.DoesNotExist:
-            mongo_prrc = PullRequestReviewComment(pull_request_review_id=mongo_prr.id, external_id=str(prrc['id']))
-        mongo_prrc.diff_hunk = prrc['diff_hunk']
+        mongo_prrc = None
+        if mongo_prr:
+            try:
+                mongo_prrc = PullRequestReviewComment.objects.get(pull_request_review_id=mongo_prr.id,
+                                                                  external_id=str(prrc['id']))
+            except PullRequestReviewComment.DoesNotExist:
+                mongo_prrc = None
+
+        new_prrc = PullRequestReviewComment(external_id=str(prrc['id']))
+        new_prrc.diff_hunk = prrc['diff_hunk']
         # we do not link to PullRequestFile here because
         # PullRequestFile is sometimes missing, maybe the file is no longer part of current file list after a commit to the pull request
-        mongo_prrc.path = prrc['path']
-        mongo_prrc.position = prrc['position']
-        mongo_prrc.original_position = prrc['original_position']
-        mongo_prrc.comment = prrc['body']
+        new_prrc.path = prrc['path']
+        new_prrc.position = prrc['position']
+        new_prrc.original_position = prrc['original_position']
+        new_prrc.comment = prrc['body']
         if prrc['user']:
-            mongo_prrc.creator_id = self._get_person(prrc['user']['url'])
-        mongo_prrc.created_at = dateutil.parser.parse(prrc['created_at'])
-        mongo_prrc.updated_at = dateutil.parser.parse(prrc['updated_at'])
-        mongo_prrc.author_association = prrc['author_association']
-        mongo_prrc.commit_sha = prrc['commit_id']
-        mongo_prrc.original_commit_sha = prrc['original_commit_id']
-        # we link the PullRequestCommits directly if we can
-        # the pullrequestcommits may have been removed or squashed, if that is the case we only have the commit_shas
-        try:
-            n1_prc = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=mongo_prrc.commit_sha)
-            mongo_prrc.pull_request_commit_id = n1_prc.id
-        except PullRequestCommit.DoesNotExist:
-            pass
-        try:
-            n2_prc = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id,
-                                                   commit_sha=mongo_prrc.original_commit_sha)
-            mongo_prrc.original_pull_request_commit_id = n2_prc.id
-        except PullRequestCommit.DoesNotExist:
-            pass
+            new_prrc.creator_id = self._get_person(prrc['user']['url'])
+        new_prrc.created_at = dateutil.parser.parse(prrc['created_at'])
+        new_prrc.updated_at = dateutil.parser.parse(prrc['updated_at'])
+        new_prrc.author_association = prrc['author_association']
+        new_prrc.commit_sha = prrc['commit_id']
+        new_prrc.original_commit_sha = prrc['original_commit_id']
         # some recent additions to the api, may not be available yet
         if 'start_line' in prrc.keys():
-            mongo_prrc.start_line = prrc['start_line']
+            new_prrc.start_line = prrc['start_line']
         if 'original_start_line' in prrc.keys():
-            mongo_prrc.original_start_line = prrc['original_start_line']
+            new_prrc.original_start_line = prrc['original_start_line']
         if 'start_side' in prrc.keys():
-            mongo_prrc.start_side = prrc['start_side']
+            new_prrc.start_side = prrc['start_side']
         if 'line' in prrc.keys():
-            mongo_prrc.line = prrc['line']
+            new_prrc.line = prrc['line']
         if 'original_line' in prrc.keys():
-            mongo_prrc.original_line = prrc['original_line']
+            new_prrc.original_line = prrc['original_line']
         if 'side' in prrc.keys():
-            mongo_prrc.side = prrc['side']
-        if 'in_reply_to_id' in prrc.keys() and prrc['in_reply_to_id']:
-            try:
-                ref_prrc = PullRequestReviewComment.objects.get(pull_request_review_id=mongo_prr.id,
-                                                                external_id=str(prrc['in_reply_to_id']))
-            except PullRequestReviewComment.DoesNotExist:
-                ref_prrc = PullRequestReviewComment(pull_request_review_id=mongo_prr.id,
-                                                    external_id=str(prrc['in_reply_to_id']))
-                ref_prrc.save()  # create empty for ref, will get populated later
-            mongo_prrc.in_reply_to_id = ref_prrc.id
-        mongo_prrc.save()
+            new_prrc.side = prrc['side']
 
-    def parse_commit(self, mongo_pr, pr_commit):
+        if 'in_reply_to_id' in prrc:
+            new_prrc.in_reply_to_id = str(prrc['in_reply_to_id'])
+
+        if (self.pr_id, self.review_id) not in self.parsed_prs['review_comments']:
+            self.parsed_prs['review_comments'][(self.pr_id, self.review_id)] = {}
+        self.parsed_prs['review_comments'][(self.pr_id, self.review_id)][str(prrc['id'])] = new_prrc
+        self.check_diff(mongo_prrc, new_prrc, 'pull_request_review_id')
+
+    def check_diff(self, old, new, ex_path):
         """
-        Parses and stores a commit related to a pull request in the database.
+        Compare and identify differences between old and new objects.
 
+        This function compares two objects, `old` and `new`, typically representing data from different
+        states, to identify differences between them. The comparison is performed by utilizing the
+        DeepDiff library. Differences are stored in the `pr_diff` dictionary for the pull request
+        identified by `self.pr_id`. If differences are found, the corresponding key in `pr_diff`
+        is set to `True`.
 
-        :param mongo_pr: The associated pull request in the MongoDB.
-        :param pr_commit: A dictionary containing commit information.
-        :return: None.
+        :param old: The old object to be compared.
+        :param new: The new object to be compared.
+        :param ex_path: List of paths to be excluded from the comparison.
+
         """
-        try:
-            mongo_pr_commit = PullRequestCommit.objects.get(pull_request_id=mongo_pr.id, commit_sha=pr_commit['sha'])
-        except PullRequestCommit.DoesNotExist:
-            mongo_pr_commit = PullRequestCommit(pull_request_id=mongo_pr.id, commit_sha=pr_commit['sha'])
-        # author and commiter urls are not always present, sometimes we only have a username and an email but no login
-
-        if pr_commit['author'] and 'url' in pr_commit['author'].keys():
-            mongo_pr_commit.author_id = self._get_person(pr_commit['author']['url'])
+        if old:
+            diff = DeepDiff(t1=old.__dict__, t2=new.__dict__, exclude_paths=ex_path)
+            if diff:
+                self.pr_diff[self.pr_id] = True
         else:
-            mongo_pr_commit.author_id = self._get_person_without_url(pr_commit['author']['name'],
-                                                                     pr_commit['author']['email'])
-
-        if pr_commit['committer'] and 'url' in pr_commit['committer'].keys():
-            mongo_pr_commit.committer_id = self._get_person(pr_commit['committer']['url'])
-        else:
-
-            mongo_pr_commit.committer_id = self._get_person_without_url(pr_commit['committer']['name'],
-                                                                       pr_commit['committer']['email'])
-
-        mongo_pr_commit.parents = [p['sha'] for p in pr_commit['parents']]
-        mongo_pr_commit.message = pr_commit['message']
-        mongo_pr_commit.commit_repo_url = self._get_repo_url(pr_commit['url'])
-        mongo_pr_commit.commit_id = self._get_commit_id(mongo_pr_commit.commit_sha, mongo_pr_commit.commit_repo_url)
-        mongo_pr_commit.save()
+            self.pr_diff[self.pr_id] = True

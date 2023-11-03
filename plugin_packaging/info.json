@@ -7,47 +7,38 @@
     ],
     "created_collections": [
         {
-            "name": "pull_request_system",
-            "shard_key": [{"url": "hashed"}]
+            "name": "pull_request_system"
         },
         {
             "name": "pull_request",
-            "shard_key": [{"external_id": 1}, {"pull_request_system_id": 1}],
             "unique": true
         },
         {
             "name": "pull_request_review",
-            "shard_key": [{"external_id": 1}, {"pull_request_id": 1}],
             "unique": true
         },
         {
             "name": "pull_request_review_comment",
-            "shard_key": [{"external_id": 1}, {"pull_request_review_id": 1}],
             "unique": true
         },
         {
             "name": "pull_request_comment",
-            "shard_key": [{"external_id": 1}, {"pull_request_id": 1}],
             "unique": true
         },
         {
             "name": "pull_request_event",
-            "shard_key": [{"external_id": 1}, {"pull_request_id": 1}],
             "unique": true
         },
         {
             "name": "pull_request_commit",
-            "shard_key": [{"commit_sha": 1}, {"pull_request_id": 1}],
             "unique": true
         },
         {
             "name": "pull_request_file",
-            "shard_key": [{"path": 1}, {"sha": 1}, {"pull_request_id": 1}],
             "unique": true
         },
         {
             "name": "people",
-            "shard_key": [{"email": 1}, {"name": 1}],
             "unique": true
         }
     ],
