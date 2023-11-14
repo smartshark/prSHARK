@@ -5,13 +5,9 @@
 import sys
 import logging
 import timeit
-import datetime
-
 from mongoengine import connect
-
-from pycoshark.utils import get_base_argparser, create_mongodb_uri_string
-from pycoshark.mongomodels import Project, PullRequestSystem
-
+from pycoshark.utils import get_base_argparser, create_mongodb_uri_string, delete_last_system_data_on_failure
+from pycoshark.mongomodels import Project
 from prSHARK.config import Config
 
 log = logging.getLogger('prSHARK')
@@ -46,24 +42,23 @@ def main(args):
         log.error('Project %s not found!', cfg.project_name)
         sys.exit(1)
 
-    # Create pull request system if not already there
-    try:
-        pr_system = PullRequestSystem.objects.get(url=cfg.tracking_url, project_id=project.id)
-    except PullRequestSystem.DoesNotExist:
-        pr_system = PullRequestSystem(project_id=project.id, url=cfg.tracking_url)
-    pr_system.save()
-
     # now we do the actual work, we are lazy for now and to not use a more dynamic import of backends
     if args.backend == 'github':
         from prSHARK.backends.github import Github
-        gh = Github(cfg, project, pr_system)
-        gh.run()
+        gh = Github(cfg, project)
+        try:
+            gh.run()
+        except (KeyboardInterrupt, Exception) as e:
+            log.error(f"Program did not run successfully. Reason:{e}")
+            log.info(f"Deleting uncompleted data .....")
+            delete_last_system_data_on_failure('pull_request_system', cfg.tracking_url, db_user=cfg.user, db_password=cfg.password,
+                                      db_hostname= cfg.host, db_port=cfg.port, db_authentication_db=cfg.authentication_db,
+                                      db_ssl=cfg.ssl_enabled, db_name=cfg.database)
+
     else:
         log.error('Backend %s not implemented', args.backend)
         sys.exit(1)
 
-    pr_system.last_updated = datetime.datetime.now()
-    pr_system.save()
 
     end = timeit.default_timer() - start
     log.info('Finished data extraction in {:.5f}s'.format(end))
