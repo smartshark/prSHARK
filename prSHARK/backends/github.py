@@ -12,7 +12,8 @@ from pycoshark.mongomodels import VCSSystem, Commit, PullRequest, People, PullRe
 
 
 class Github:
-    """Github Pull Request API connector
+    """
+    Github Pull Request API connector
 
     This is similiar to the issueSHARK github backend only that this fetches pull requests instead of issues.
     However, since every pull request is an issue in github we also fetch events and comments from the issue endpoint.
@@ -122,7 +123,7 @@ class Github:
             if repo_url and repo_url not in vcs.url:
                 continue
             try:
-                commit_id = Commit.objects.get(vcs_system_id=vcs.id, revision_hash=revision_hash).id
+                commit_id = Commit.objects.get(vcs_system_ids=vcs.id, revision_hash=revision_hash).id
             except Commit.DoesNotExist:  # happens for deleted branches of force pushes, e.g. https://github.com/ravibpatel/AutoUpdater.NET/commit/8dd52654733d688b0111064fd1a841f6769dc082
                 pass
         return commit_id
@@ -460,7 +461,6 @@ class Github:
             if mongo_pr:
                 try:
                     mongo_pr_file = PullRequestFile.objects.get(pull_request_id=mongo_pr.id, path=pr_file['filename'])
-
                 except PullRequestFile.DoesNotExist:
                     mongo_pr_file = None
             new_pr_file = PullRequestFile(path=pr_file['filename'])
