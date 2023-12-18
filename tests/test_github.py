@@ -1,7 +1,6 @@
 """Tests for the github backend"""
 
 import datetime
-import pprint
 import unittest
 import json
 from unittest.mock import patch
@@ -11,7 +10,7 @@ import mongomock
 
 import mongoengine
 
-from pycoshark.mongomodels import Project, VCSSystem, Commit, PullRequestSystem, PullRequest, People, PullRequestReview, PullRequestReviewComment, PullRequestComment, PullRequestEvent, PullRequestCommit, PullRequestFile
+from pycoshark.mongomodels import Project, VCSSystem, Commit, PullRequestSystem, PullRequest, People, PullRequestReview, PullRequestReviewComment, PullRequestComment, PullRequestEvent, PullRequestFile
 from prSHARK.backends.github import Github
 
 # load simple fixtures (taken from the github api examples)
@@ -86,7 +85,7 @@ class TestGithubBackend(unittest.TestCase):
         p = Project(name='test')
         p.save()
 
-        pr_system = PullRequestSystem(project_id=p.id, url='https://localhost/repos/smartshark/test/pulls')
+        pr_system = PullRequestSystem(project_id=p.id, url='https://localhost/repos/smartshark/test/pulls', collection_date=datetime.datetime.now())
         pr_system.save()
 
     def tearDown(self):
@@ -100,23 +99,22 @@ class TestGithubBackend(unittest.TestCase):
         cfg = Namespace(tracking_url='https://localhost/repos/smartshark/test/pulls')
 
         project = Project.objects.get(name='test')
-        pr_system = PullRequestSystem.objects.get(project_id=project.id)
 
-        vcs_system = VCSSystem(project_id=project.id, url='https://github.com/octocat/Hello-World.git', repository_type='git')
+        vcs_system = VCSSystem(project_id=project.id, url='https://github.com/octocat/Hello-World.git',
+                               repository_type='git', collection_date=datetime.datetime.now())
         vcs_system.save()
 
-        c = Commit(vcs_system_id=vcs_system.id, revision_hash='6dcb09b5b57875f334f61aebed695e2e4193db5e')
+        c = Commit(vcs_system_ids=[vcs_system.id], revision_hash='6dcb09b5b57875f334f61aebed695e2e4193db5e')
         c.save()
 
-        mc = Commit(vcs_system_id=vcs_system.id, revision_hash='e5bd3914e2e596debea16f433f57875b5b90bcd6')
+        mc = Commit(vcs_system_ids=[vcs_system.id], revision_hash='e5bd3914e2e596debea16f433f57875b5b90bcd6')
         mc.save()
-
         with open('tests/fixtures/pr_list.json', 'r') as fi:
             data = json.loads(fi.read())
 
         pr1 = data[0]
-        gp = Github(cfg, project, pr_system)
-        gp.parse_pr_list(data)
+        gp = Github(cfg, project)
+        gp.run()
         pr = PullRequest.objects.get(external_id='1347')
         p = People.objects.get(id=pr.assignee_id)
         h = People.objects.get(name='mr hubot')
@@ -126,7 +124,6 @@ class TestGithubBackend(unittest.TestCase):
         prc = PullRequestComment.objects.get(pull_request_id=pr.id)
         pre = PullRequestEvent.objects.get(pull_request_id=pr.id)
 
-        prcc = PullRequestCommit.objects.get(pull_request_id=pr.id)
         prccf = PullRequestFile.objects.get(pull_request_id=pr.id)
 
         self.assertEqual(p.name, 'monalisa octocat')
@@ -166,7 +163,6 @@ class TestGithubBackend(unittest.TestCase):
         self.assertEqual(prr.author_association, 'collaborator')
         self.assertEqual(prr.creator_id, p.id)
         self.assertEqual(prr.commit_sha, 'ecdd80bb57125d7ba9641ffaa4d7d2c19d3f3091')
-
         # pull request review comment
         self.assertEqual(prrc.comment, 'Great stuff!')
         self.assertEqual(prrc.path, 'file1.txt')
@@ -201,15 +197,6 @@ class TestGithubBackend(unittest.TestCase):
         self.assertEqual(pre.commit_id, c.id)
         self.assertEqual(pre.created_at, datetime.datetime(2011, 4, 14, 16, 0, 49))
 
-        # everything for the commit
-        author_id = People.objects.get(name='monalisa octocat').id
-        self.assertEqual(prcc.commit_sha, '6dcb09b5b57875f334f61aebed695e2e4193db5e')
-        self.assertEqual(prcc.commit_repo_url, 'https://github.com/octocat/Hello-World')
-        self.assertEqual(prcc.message, "Fix all the bugs")
-        self.assertEqual(prcc.author_id, author_id)
-        self.assertEqual(prcc.committer_id, author_id)
-        self.assertEqual(prcc.commit_id, c.id)  # should equal our created Commit above
-        self.assertEqual(prcc.parents, ['6dcb09b5b57875f334f61aebed695e2e4193db5e'])
 
         # everything for the file
         self.assertEqual(prccf.sha, 'bbcd538c8e72b8c175046e27cc8f907076331401')
