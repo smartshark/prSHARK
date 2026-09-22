@@ -467,33 +467,29 @@ class Github:
         """
 
         existing_commits = mongo_pr.commits if mongo_pr else None
-        existing_commits_dict = {commit.commit_sha: commit for commit in existing_commits or []}
         new_commits = []
         for commit in self.fetch_commit_list(pr["number"]):
-            if commit["sha"] not in existing_commits_dict:
-                author_id = self._get_person(commit["author"]["url"])
-                committer_id = self._get_person(commit["committer"]["url"])
-                parents = []
-                for parent in commit["parents"]:
-                    parents.append(
-                        PullRequestCommitParent(
-                            commit_sha=parent["sha"],
-                            commit_id=self._get_commit_id(parent["sha"], self._get_repo_url(parent["url"])),
-                        )
+            author_id = self._get_person(commit["author"]["url"])
+            committer_id = self._get_person(commit["committer"]["url"])
+            parents = []
+            for parent in commit["parents"]:
+                parents.append(
+                    PullRequestCommitParent(
+                        commit_sha=parent["sha"],
+                        commit_id=self._get_commit_id(parent["sha"], self._get_repo_url(parent["url"])),
                     )
-
-                commit_doc = PullRequestCommit(
-                    commit_id=None,
-                    commit_sha=commit["sha"],
-                    author_id=author_id,
-                    committer_id=committer_id,
-                    message=commit["commit"]["message"],
-                    parents=parents,
                 )
 
-                new_commits.append(commit_doc)
-            else:
-                new_commits.append(existing_commits_dict[commit["sha"]])
+            commit_doc = PullRequestCommit(
+                commit_id=None,
+                commit_sha=commit["sha"],
+                author_id=author_id,
+                committer_id=committer_id,
+                message=commit["commit"]["message"],
+                parents=parents,
+            )
+
+            new_commits.append(commit_doc)
 
         self.parsed_prs["prs"][self.pr_id].commits = new_commits
         self.check_diff(existing_commits, new_commits, "pull_request_id")
