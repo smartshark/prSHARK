@@ -94,7 +94,7 @@ class TestGithubBackend(unittest.TestCase):
     def setUp(self):
         """Setup the mongomock connection."""
         mongoengine.connection.disconnect()
-        mongoengine.connect("testdb", host="mongodb://localhost", mongo_client_class=mongomock.MongoClient)
+        mongoengine.connect("testdb", host="mongodb://localhost", is_mock=True)
         p = Project(name="test")
         p.save()
 

@@ -427,10 +427,7 @@ class Github:
 
             for event in self.fetch_timeline_list(pr["number"]):
 
-                if event["event"] == "committed":
-                    new_pr.commits.append(event["sha"])
-
-                elif event["event"] == "reviewed":
+                if event["event"] == "reviewed":
 
                     self.pares_review(mongo_pr, pr, event)
 
@@ -446,6 +443,10 @@ class Github:
                         new_pr.requested_reviewer_ids.append(self._get_person(event["requested_reviewer"]["url"]))
 
             self.parsed_prs["prs"][self.pr_id] = new_pr
+
+            # commits
+            self.parse_commits(mongo_pr, pr)
+
             self.check_diff(mongo_pr, new_pr, "pull_request_system_ids")
 
             # pr files, sha is not a link to PullRequestCommit, maybe its the file hash
@@ -453,9 +454,6 @@ class Github:
 
             # events
             self.parse_events(mongo_pr, pr)
-
-            # commits
-            self.parse_commits(mongo_pr, pr)
 
     def parse_commits(self, mongo_pr, pr):
         """
@@ -466,7 +464,6 @@ class Github:
         :return: None
         """
 
-        existing_commits = mongo_pr.commits if mongo_pr else None
         new_commits = []
         for commit in self.fetch_commit_list(pr["number"]):
             author_id = self._get_person(commit["author"]["url"])
@@ -492,7 +489,6 @@ class Github:
             new_commits.append(commit_doc)
 
         self.parsed_prs["prs"][self.pr_id].commits = new_commits
-        self.check_diff(existing_commits, new_commits, "pull_request_id")
 
     def parse_events(self, mongo_pr, pr):
         """
