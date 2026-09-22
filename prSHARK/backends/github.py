@@ -9,6 +9,8 @@ import dateutil
 from deepdiff import DeepDiff
 from prSHARK.utils import process_date
 from pycoshark.mongomodels import (
+    PullRequestCommit,
+    PullRequestCommitParent,
     VCSSystem,
     Commit,
     PullRequest,
@@ -45,6 +47,26 @@ class Github:
 
         self._people = {}  # people cache
 
+    def _parse_response(self, resp, url):
+        """
+        Parses the JSON body of a requests response, logging the url, status code and
+        body if the response is not valid JSON so that the offending request can be traced.
+
+        :param resp: requests response object
+        :param url: url to which the request was sent
+        :return: parsed JSON content
+        """
+        try:
+            return resp.json()
+        except ValueError:
+            self._log.error(
+                "Failed to parse JSON response for url %s. Code: %s, Body: %s",
+                url,
+                resp.status_code,
+                resp.text[:1000],
+            )
+            raise
+
     def _send_request(self, url):
         """
         Sends arequest using the requests library to the url specified
@@ -74,7 +96,7 @@ class Github:
                 # check if we just miss some field, e.g., pulls/{number}/files?&page=1&per_page=100.
                 # Error: {"message":"Sorry, there was a problem generating this diff. The repository may be missing relevant data.","errors":[{"resource":"PullRequest","field":"diff","code":"not_available"}],"documentation_url":"https://docs.github.com/v3/pulls#diff-error"}
                 if resp.status_code == 422:
-                    r = resp.json()
+                    r = self._parse_response(resp, url)
                     if r:
                         if "errors" in r.keys():
                             for e in r["errors"]:
@@ -112,9 +134,11 @@ class Github:
 
                     resp = requests.get(url, headers=headers, proxies=self.config.get_proxy_dictionary(), auth=auth)
 
-                self._log.debug("Got response: %s", resp.json())
+                data = self._parse_response(resp, url)
 
-                return resp.json()
+                self._log.debug("Got response: %s", data)
+
+                return data
 
         raise requests.RequestException("Problem with getting data via url %s." % url)
 
@@ -166,16 +190,24 @@ class Github:
             login = "invalid-email-address"
             email = "null"
         else:
-            raw_user = self._send_request(user_url)
-            name = raw_user["name"]
-            login = raw_user["login"]
-
-            if name is None:
-                name = raw_user["login"]
-
-            email = raw_user["email"]
-            if email is None:
+            try:
+                raw_user = self._send_request(user_url)
+            except requests.RequestException:
+                # deleted or suspended accounts (e.g. the GitHub Copilot bot) return a 404.
+                # We still need a person, so we derive it from the url and prefix the name.
+                login = user_url.rstrip("/").split("/")[-1]
+                name = "deleted_%s" % login
                 email = "null"
+            else:
+                name = raw_user["name"]
+                login = raw_user["login"]
+
+                if name is None:
+                    name = raw_user["login"]
+
+                email = raw_user["email"]
+                if email is None:
+                    email = "null"
 
         people_id = People.objects(name=name, email=email).upsert_one(name=name, email=email, username=login).id
         self._people[user_url] = people_id
@@ -395,10 +427,7 @@ class Github:
 
             for event in self.fetch_timeline_list(pr["number"]):
 
-                if event["event"] == "committed":
-                    new_pr.commits.append(event["sha"])
-
-                elif event["event"] == "reviewed":
+                if event["event"] == "reviewed":
 
                     self.pares_review(mongo_pr, pr, event)
 
@@ -414,6 +443,10 @@ class Github:
                         new_pr.requested_reviewer_ids.append(self._get_person(event["requested_reviewer"]["url"]))
 
             self.parsed_prs["prs"][self.pr_id] = new_pr
+
+            # commits
+            self.parse_commits(mongo_pr, pr)
+
             self.check_diff(mongo_pr, new_pr, "pull_request_system_ids")
 
             # pr files, sha is not a link to PullRequestCommit, maybe its the file hash
@@ -421,6 +454,41 @@ class Github:
 
             # events
             self.parse_events(mongo_pr, pr)
+
+    def parse_commits(self, mongo_pr, pr):
+        """
+        Parse and process commits associated with a pull request.
+
+        :param mongo_pr: The MongoDB representation of the pull request.
+        :param pr: The pull request data from an external source (e.g., GitHub API).
+        :return: None
+        """
+
+        new_commits = []
+        for commit in self.fetch_commit_list(pr["number"]):
+            author_id = self._get_person(commit["author"]["url"])
+            committer_id = self._get_person(commit["committer"]["url"])
+            parents = []
+            for parent in commit["parents"]:
+                parents.append(
+                    PullRequestCommitParent(
+                        commit_sha=parent["sha"],
+                        commit_id=self._get_commit_id(parent["sha"], self._get_repo_url(parent["url"])),
+                    )
+                )
+
+            commit_doc = PullRequestCommit(
+                commit_id=None,
+                commit_sha=commit["sha"],
+                author_id=author_id,
+                committer_id=committer_id,
+                message=commit["commit"]["message"],
+                parents=parents,
+            )
+
+            new_commits.append(commit_doc)
+
+        self.parsed_prs["prs"][self.pr_id].commits = new_commits
 
     def parse_events(self, mongo_pr, pr):
         """
@@ -637,7 +705,14 @@ class Github:
             self.pr_diff[self.pr_id] = False
 
         if old:
-            diff = DeepDiff(t1=old.to_mongo().to_dict(), t2=new.to_mongo().to_dict(), exclude_paths=["_id", ex_path])
+            if isinstance(old, (list, tuple)):
+                old_dict = [o.to_mongo().to_dict() for o in old]
+                new_dict = [n.to_mongo().to_dict() for n in new]
+                diff = DeepDiff(t1=old_dict, t2=new_dict, exclude_paths=["_id", ex_path])
+            else:
+                diff = DeepDiff(
+                    t1=old.to_mongo().to_dict(), t2=new.to_mongo().to_dict(), exclude_paths=["_id", ex_path]
+                )
             if diff:
                 self.pr_diff[self.pr_id] = True
         else:

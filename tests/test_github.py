@@ -3,6 +3,7 @@
 import datetime
 import unittest
 import json
+import requests
 from unittest.mock import patch
 from argparse import Namespace
 import mongomock
@@ -93,7 +94,7 @@ class TestGithubBackend(unittest.TestCase):
     def setUp(self):
         """Setup the mongomock connection."""
         mongoengine.connection.disconnect()
-        mongoengine.connect("testdb", host="mongodb://localhost", mongo_client_class=mongomock.MongoClient)
+        mongoengine.connect("testdb", host="mongodb://localhost", is_mock=True)
         p = Project(name="test")
         p.save()
 
@@ -226,6 +227,16 @@ class TestGithubBackend(unittest.TestCase):
         self.assertEqual(prccf.changes, 103 + 21)
         self.assertEqual(prccf.patch, "@@ -132,7 +132,7 @@ module Test @@ -1000,7 +1000,7 @@ module Test")
 
+        # everything for the commits parsed by parse_commits
+        self.assertEqual(len(pr.commits), 1)
+        self.assertEqual(pr.commits[0].commit_sha, "6dcb09b5b57875f334f61aebed695e2e4193db5e")
+        self.assertEqual(pr.commits[0].message, "Fix all the bugs")
+        self.assertIsNotNone(pr.commits[0].author_id)
+        self.assertIsNotNone(pr.commits[0].committer_id)
+        self.assertEqual(len(pr.commits[0].parents), 1)
+        self.assertEqual(pr.commits[0].parents[0].commit_sha, "e5bd3914e2e596debea16f433f57875b5b90bcd6")
+        self.assertEqual(pr.commits[0].parents[0].commit_id, mc.id)
+
     @patch("prSHARK.backends.github.Github._send_request", side_effect=mock_return)
     def test_update_without_changes(self, mock_request):
         """
@@ -324,3 +335,27 @@ class TestGithubBackend(unittest.TestCase):
         self.assertEqual(len(prccf), 2)
         self.assertEqual(prccf[0].pull_request_id, pr[0].id)
         self.assertEqual(prccf[1].pull_request_id, pr[1].id)
+
+    def test_get_person_deleted_user(self):
+        """
+        A user url that returns a 404 (deleted/suspended account) must not abort parsing.
+        We expect a placeholder People entry with name 'deleted_<login>' derived from the url.
+        """
+        cfg = Namespace(tracking_url="https://localhost/repos/smartshark/test/pulls")
+        project = Project.objects.get(name="test")
+
+        gp = Github(cfg, project)
+
+        def raise_404(*args, **kwargs):
+            raise requests.RequestException("Problem with getting data via url %s." % args[0])
+
+        with patch.object(gp, "_send_request", side_effect=raise_404):
+            people_id = gp._get_person("https://api.github.com/users/Copilot")
+
+        person = People.objects.get(id=people_id)
+        self.assertEqual(person.name, "deleted_Copilot")
+        self.assertEqual(person.username, "Copilot")
+        self.assertEqual(person.email, "null")
+
+        # the result must be cached so we do not hit the api again
+        self.assertIn("https://api.github.com/users/Copilot", gp._people)
