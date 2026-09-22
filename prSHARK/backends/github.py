@@ -9,8 +9,8 @@ import dateutil
 from deepdiff import DeepDiff
 from prSHARK.utils import process_date
 from pycoshark.mongomodels import (
-    PullRequestCommitData,
-    PullRequestCommitParentData,
+    PullRequestCommit,
+    PullRequestCommitParent,
     VCSSystem,
     Commit,
     PullRequest,
@@ -471,24 +471,18 @@ class Github:
         new_commits = []
         for commit in self.fetch_commit_list(pr["number"]):
             if commit["sha"] not in existing_commits_dict:
-                author_id = self._get_person_without_url(
-                    commit["commit"]["author"]["name"],
-                    commit["commit"]["author"]["email"],
-                )
-                committer_id = self._get_person_without_url(
-                    commit["commit"]["committer"]["name"],
-                    commit["commit"]["committer"]["email"],
-                )
+                author_id = self._get_person(commit["author"]["url"])
+                committer_id = self._get_person(commit["committer"]["url"])
                 parents = []
                 for parent in commit["parents"]:
                     parents.append(
-                        PullRequestCommitParentData(
+                        PullRequestCommitParent(
                             commit_sha=parent["sha"],
                             commit_id=self._get_commit_id(parent["sha"], self._get_repo_url(parent["url"])),
                         )
                     )
 
-                commit_doc = PullRequestCommitData(
+                commit_doc = PullRequestCommit(
                     commit_id=None,
                     commit_sha=commit["sha"],
                     author_id=author_id,
